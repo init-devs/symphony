@@ -54,6 +54,51 @@ defmodule SymphonyElixir.Linear.Client do
   }
   """
 
+  @team_query """
+  query SymphonyLinearPollByTeam($teamKey: String!, $stateNames: [String!]!, $first: Int!, $relationFirst: Int!, $after: String) {
+    issues(filter: {team: {key: {eq: $teamKey}}, state: {name: {in: $stateNames}}}, first: $first, after: $after) {
+      nodes {
+        id
+        identifier
+        title
+        description
+        priority
+        state {
+          name
+        }
+        branchName
+        url
+        assignee {
+          id
+        }
+        labels {
+          nodes {
+            name
+          }
+        }
+        inverseRelations(first: $relationFirst) {
+          nodes {
+            type
+            issue {
+              id
+              identifier
+              state {
+                name
+              }
+            }
+          }
+        }
+        createdAt
+        updatedAt
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+  """
+
   @query_by_ids """
   query SymphonyLinearIssuesById($ids: [ID!]!, $first: Int!, $relationFirst: Int!) {
     issues(filter: {id: {in: $ids}}, first: $first) {
@@ -105,18 +150,18 @@ defmodule SymphonyElixir.Linear.Client do
 
   @spec fetch_candidate_issues() :: {:ok, [Issue.t()]} | {:error, term()}
   def fetch_candidate_issues do
-    project_slug = Config.linear_project_slug()
+    scope = Config.linear_scope()
 
     cond do
       is_nil(Config.linear_api_token()) ->
         {:error, :missing_linear_api_token}
 
-      is_nil(project_slug) ->
-        {:error, :missing_linear_project_slug}
+      is_nil(scope) ->
+        {:error, :missing_linear_scope}
 
       true ->
         with {:ok, assignee_filter} <- routing_assignee_filter() do
-          do_fetch_by_states(project_slug, Config.linear_active_states(), assignee_filter)
+          do_fetch_by_states(scope, Config.linear_active_states(), assignee_filter)
         end
     end
   end
@@ -128,19 +173,26 @@ defmodule SymphonyElixir.Linear.Client do
     if normalized_states == [] do
       {:ok, []}
     else
-      project_slug = Config.linear_project_slug()
+      scope = Config.linear_scope()
 
       cond do
         is_nil(Config.linear_api_token()) ->
           {:error, :missing_linear_api_token}
 
-        is_nil(project_slug) ->
-          {:error, :missing_linear_project_slug}
+        is_nil(scope) ->
+          {:error, :missing_linear_scope}
 
         true ->
-          do_fetch_by_states(project_slug, normalized_states, nil)
+          do_fetch_by_states(scope, normalized_states, nil)
       end
     end
+  end
+
+  @doc false
+  @spec scope_query_for_test({:project_slug, String.t()} | {:team_key, String.t()}, [String.t()], String.t() | nil) ::
+          {String.t(), map()}
+  def scope_query_for_test(scope, state_names, after_cursor \\ nil) do
+    build_scope_query(scope, state_names, after_cursor)
   end
 
   @spec fetch_issue_states_by_ids([String.t()]) :: {:ok, [Issue.t()]} | {:error, term()}
@@ -218,25 +270,21 @@ defmodule SymphonyElixir.Linear.Client do
     |> finalize_paginated_issues()
   end
 
-  defp do_fetch_by_states(project_slug, state_names, assignee_filter) do
-    do_fetch_by_states_page(project_slug, state_names, assignee_filter, nil, [])
+  defp do_fetch_by_states(scope, state_names, assignee_filter) do
+    do_fetch_by_states_page(scope, state_names, assignee_filter, nil, [])
   end
 
-  defp do_fetch_by_states_page(project_slug, state_names, assignee_filter, after_cursor, acc_issues) do
+  defp do_fetch_by_states_page(scope, state_names, assignee_filter, after_cursor, acc_issues) do
+    {query, variables} = build_scope_query(scope, state_names, after_cursor)
+
     with {:ok, body} <-
-           graphql(@query, %{
-             projectSlug: project_slug,
-             stateNames: state_names,
-             first: @issue_page_size,
-             relationFirst: @issue_page_size,
-             after: after_cursor
-           }),
+           graphql(query, variables),
          {:ok, issues, page_info} <- decode_linear_page_response(body, assignee_filter) do
       updated_acc = prepend_page_issues(issues, acc_issues)
 
       case next_page_cursor(page_info) do
         {:ok, next_cursor} ->
-          do_fetch_by_states_page(project_slug, state_names, assignee_filter, next_cursor, updated_acc)
+          do_fetch_by_states_page(scope, state_names, assignee_filter, next_cursor, updated_acc)
 
         :done ->
           {:ok, finalize_paginated_issues(updated_acc)}
@@ -252,6 +300,28 @@ defmodule SymphonyElixir.Linear.Client do
   end
 
   defp finalize_paginated_issues(acc_issues) when is_list(acc_issues), do: Enum.reverse(acc_issues)
+
+  defp build_scope_query({:project_slug, project_slug}, state_names, after_cursor) do
+    {@query,
+     %{
+       projectSlug: project_slug,
+       stateNames: state_names,
+       first: @issue_page_size,
+       relationFirst: @issue_page_size,
+       after: after_cursor
+     }}
+  end
+
+  defp build_scope_query({:team_key, team_key}, state_names, after_cursor) do
+    {@team_query,
+     %{
+       teamKey: team_key,
+       stateNames: state_names,
+       first: @issue_page_size,
+       relationFirst: @issue_page_size,
+       after: after_cursor
+     }}
+  end
 
   defp do_fetch_issue_states(ids, assignee_filter) do
     case graphql(@query_by_ids, %{

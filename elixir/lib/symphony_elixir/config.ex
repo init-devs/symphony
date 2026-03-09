@@ -53,6 +53,7 @@ defmodule SymphonyElixir.Config do
                                  endpoint: [type: :string, default: @default_linear_endpoint],
                                  api_key: [type: {:or, [:string, nil]}, default: nil],
                                  project_slug: [type: {:or, [:string, nil]}, default: nil],
+                                 team_key: [type: {:or, [:string, nil]}, default: nil],
                                  assignee: [type: {:or, [:string, nil]}, default: nil],
                                  active_states: [
                                    type: {:list, :string},
@@ -199,6 +200,28 @@ defmodule SymphonyElixir.Config do
   @spec linear_project_slug() :: String.t() | nil
   def linear_project_slug do
     get_in(validated_workflow_options(), [:tracker, :project_slug])
+  end
+
+  @spec linear_team_key() :: String.t() | nil
+  def linear_team_key do
+    get_in(validated_workflow_options(), [:tracker, :team_key])
+  end
+
+  @spec linear_scope() :: {:project_slug, String.t()} | {:team_key, String.t()} | nil
+  def linear_scope do
+    project_slug = linear_project_slug()
+    team_key = linear_team_key()
+
+    cond do
+      is_binary(project_slug) ->
+        {:project_slug, project_slug}
+
+      is_binary(team_key) ->
+        {:team_key, team_key}
+
+      true ->
+        nil
+    end
   end
 
   @spec linear_assignee() :: String.t() | nil
@@ -366,7 +389,7 @@ defmodule SymphonyElixir.Config do
     with {:ok, _workflow} <- current_workflow(),
          :ok <- require_tracker_kind(),
          :ok <- require_linear_token(),
-         :ok <- require_linear_project(),
+         :ok <- require_linear_scope(),
          :ok <- require_valid_codex_runtime_settings() do
       require_codex_command()
     end
@@ -409,13 +432,13 @@ defmodule SymphonyElixir.Config do
     end
   end
 
-  defp require_linear_project do
+  defp require_linear_scope do
     case tracker_kind() do
       "linear" ->
-        if is_binary(linear_project_slug()) do
-          :ok
+        if is_nil(linear_scope()) do
+          {:error, :missing_linear_scope}
         else
-          {:error, :missing_linear_project_slug}
+          :ok
         end
 
       _ ->
@@ -463,6 +486,7 @@ defmodule SymphonyElixir.Config do
     |> put_if_present(:endpoint, scalar_string_value(Map.get(section, "endpoint")))
     |> put_if_present(:api_key, binary_value(Map.get(section, "api_key"), allow_empty: true))
     |> put_if_present(:project_slug, scalar_string_value(Map.get(section, "project_slug")))
+    |> put_if_present(:team_key, scalar_string_value(Map.get(section, "team_key")))
     |> put_if_present(:active_states, csv_value(Map.get(section, "active_states")))
     |> put_if_present(:terminal_states, csv_value(Map.get(section, "terminal_states")))
   end

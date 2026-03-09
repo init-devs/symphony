@@ -2,6 +2,9 @@
 tracker:
   kind: linear
   project_slug: "symphony-0c79b11b75ea"
+  # Team-scoped alternative:
+  # team_key: "ES"
+  # If both are set, project_slug takes precedence.
   active_states:
     - Todo
     - In Progress

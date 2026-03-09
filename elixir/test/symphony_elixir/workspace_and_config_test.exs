@@ -269,6 +269,17 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     refute issue.assigned_to_worker
   end
 
+  test "config resolves team-scoped linear settings when project slug is absent" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_project_slug: nil,
+      tracker_team_key: "ES"
+    )
+
+    assert Config.linear_project_slug() == nil
+    assert Config.linear_team_key() == "ES"
+    assert Config.linear_scope() == {:team_key, "ES"}
+  end
+
   test "linear client normalizes blockers from inverse relations" do
     raw_issue = %{
       "id" => "issue-1",
@@ -346,6 +357,25 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     merged = Client.merge_issue_pages_for_test([issue_page_1, issue_page_2])
 
     assert Enum.map(merged, & &1.identifier) == ["MT-1", "MT-2", "MT-3"]
+  end
+
+  test "linear client builds project-scoped query payload when project scope is selected" do
+    {query, variables} =
+      Client.scope_query_for_test({:project_slug, "es-foundation-df8f5b414e47"}, ["Todo", "In Progress"])
+
+    assert query =~ "project: {slugId: {eq: $projectSlug}}"
+    assert variables.projectSlug == "es-foundation-df8f5b414e47"
+    assert variables.stateNames == ["Todo", "In Progress"]
+    refute Map.has_key?(variables, :teamKey)
+  end
+
+  test "linear client builds team-scoped query payload when team scope is selected" do
+    {query, variables} = Client.scope_query_for_test({:team_key, "ES"}, ["Todo", "In Progress"])
+
+    assert query =~ "team: {key: {eq: $teamKey}}"
+    assert variables.teamKey == "ES"
+    assert variables.stateNames == ["Todo", "In Progress"]
+    refute Map.has_key?(variables, :projectSlug)
   end
 
   test "linear client logs response bodies for non-200 graphql responses" do
@@ -652,12 +682,15 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       codex_read_timeout_ms: nil,
       codex_stall_timeout_ms: nil,
       tracker_api_token: nil,
-      tracker_project_slug: nil
+      tracker_project_slug: nil,
+      tracker_team_key: nil
     )
 
     assert Config.linear_endpoint() == "https://api.linear.app/graphql"
     assert Config.linear_api_token() == nil
     assert Config.linear_project_slug() == nil
+    assert Config.linear_team_key() == nil
+    assert Config.linear_scope() == nil
     assert Config.workspace_root() == Path.join(System.tmp_dir!(), "symphony_workspaces")
     assert Config.max_concurrent_agents() == 10
     assert Config.codex_command() == "codex app-server"

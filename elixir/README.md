@@ -37,8 +37,9 @@ Symphony stops the active agent for that issue and cleans up matching workspaces
    - The `linear` skill expects Symphony's `linear_graphql` app-server tool for raw Linear GraphQL
      operations such as comment editing or upload flows.
 5. Customize the copied `WORKFLOW.md` file for your project.
-   - To get your project's slug, right-click the project and copy its URL. The slug is part of the
-     URL.
+   - To use project-scoped polling, get your project's slug by right-clicking the project and
+     copying its URL.
+   - To use team-scoped polling, set the team's key (for example `ES`).
    - When creating a workflow based on this repo, note that it depends on non-standard Linear
      issue statuses: "Rework", "Human Review", and "Merging". You can customize them in
      Team Settings → Workflow in Linear.
@@ -107,9 +108,30 @@ You are working on a Linear issue {{ issue.identifier }}.
 Title: {{ issue.title }} Body: {{ issue.description }}
 ```
 
+Scope examples:
+
+Project scoped (existing):
+
+```yaml
+tracker:
+  kind: linear
+  project_slug: "es-foundation-df8f5b414e47"
+```
+
+Team scoped (new):
+
+```yaml
+tracker:
+  kind: linear
+  team_key: "ES"
+```
+
 Notes:
 
 - If a value is missing, defaults are used.
+- For `tracker.kind: linear`, set at least one scope: `tracker.project_slug` or
+  `tracker.team_key`.
+- If both are set, `tracker.project_slug` takes precedence.
 - Safer Codex defaults are used when policy fields are omitted:
   - `codex.approval_policy` defaults to `{"reject":{"sandbox_approval":true,"rules":true,"mcp_elicitations":true}}`
   - `codex.thread_sandbox` defaults to `workspace-write`
