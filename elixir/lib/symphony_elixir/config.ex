@@ -226,8 +226,12 @@ defmodule SymphonyElixir.Config do
 
   @spec linear_assignee() :: String.t() | nil
   def linear_assignee do
-    validated_workflow_options()
-    |> get_in([:tracker, :assignee])
+    workflow_assignee =
+      validated_workflow_options()
+      |> get_in([:tracker, :assignee])
+      |> normalize_secret_value()
+
+    workflow_assignee
     |> resolve_env_value(System.get_env("LINEAR_ASSIGNEE"))
     |> normalize_secret_value()
   end
@@ -487,6 +491,7 @@ defmodule SymphonyElixir.Config do
     |> put_if_present(:api_key, binary_value(Map.get(section, "api_key"), allow_empty: true))
     |> put_if_present(:project_slug, scalar_string_value(Map.get(section, "project_slug")))
     |> put_if_present(:team_key, scalar_string_value(Map.get(section, "team_key")))
+    |> put_if_present(:assignee, scalar_string_value(Map.get(section, "assignee")))
     |> put_if_present(:active_states, csv_value(Map.get(section, "active_states")))
     |> put_if_present(:terminal_states, csv_value(Map.get(section, "terminal_states")))
   end

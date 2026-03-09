@@ -5,6 +5,8 @@ tracker:
   # Team-scoped alternative:
   # team_key: "ES"
   # If both are set, project_slug takes precedence.
+  # Optional assignee routing:
+  # assignee: "me"
   active_states:
     - Todo
     - In Progress

@@ -151,6 +151,60 @@ defmodule SymphonyElixir.CoreTest do
     assert Config.linear_assignee() == env_assignee
   end
 
+  test "linear assignee resolves from workflow and overrides LINEAR_ASSIGNEE" do
+    previous_linear_assignee = System.get_env("LINEAR_ASSIGNEE")
+
+    on_exit(fn -> restore_env("LINEAR_ASSIGNEE", previous_linear_assignee) end)
+    System.put_env("LINEAR_ASSIGNEE", "worker-from-env")
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_assignee: "  me  ",
+      tracker_project_slug: "project",
+      codex_command: "/bin/sh app-server"
+    )
+
+    assert Config.linear_assignee() == "me"
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_assignee: "  user-123  ",
+      tracker_project_slug: "project",
+      codex_command: "/bin/sh app-server"
+    )
+
+    assert Config.linear_assignee() == "user-123"
+  end
+
+  test "linear assignee falls back to LINEAR_ASSIGNEE when workflow assignee is empty" do
+    previous_linear_assignee = System.get_env("LINEAR_ASSIGNEE")
+    env_assignee = "fallback-worker"
+
+    on_exit(fn -> restore_env("LINEAR_ASSIGNEE", previous_linear_assignee) end)
+    System.put_env("LINEAR_ASSIGNEE", env_assignee)
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_assignee: "   ",
+      tracker_project_slug: "project",
+      codex_command: "/bin/sh app-server"
+    )
+
+    assert Config.linear_assignee() == env_assignee
+  end
+
+  test "linear assignee is nil when workflow assignee is empty and LINEAR_ASSIGNEE is unset" do
+    previous_linear_assignee = System.get_env("LINEAR_ASSIGNEE")
+
+    on_exit(fn -> restore_env("LINEAR_ASSIGNEE", previous_linear_assignee) end)
+    System.delete_env("LINEAR_ASSIGNEE")
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_assignee: "",
+      tracker_project_slug: "project",
+      codex_command: "/bin/sh app-server"
+    )
+
+    assert Config.linear_assignee() == nil
+  end
+
   test "workflow file path defaults to WORKFLOW.md in the current working directory when app env is unset" do
     original_workflow_path = Workflow.workflow_file_path()
 

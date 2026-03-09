@@ -132,6 +132,8 @@ Notes:
 - For `tracker.kind: linear`, set at least one scope: `tracker.project_slug` or
   `tracker.team_key`.
 - If both are set, `tracker.project_slug` takes precedence.
+- `tracker.assignee` optionally filters candidate issues by assignee (`me` or a Linear user ID).
+- Assignee precedence is non-empty `tracker.assignee` first, then `LINEAR_ASSIGNEE`; empty values are treated as unset.
 - Safer Codex defaults are used when policy fields are omitted:
   - `codex.approval_policy` defaults to `{"reject":{"sandbox_approval":true,"rules":true,"mcp_elicitations":true}}`
   - `codex.thread_sandbox` defaults to `workspace-write`
