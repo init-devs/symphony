@@ -1,42 +1,91 @@
 "use client"
 
-import type { IssueDetail } from "@/lib/mock-data"
+import Link from "next/link"
+import { useCallback, useEffect, useState } from "react"
 import {
-  PhaseBadge,
-  ClaimBadge,
-  PriorityDot,
-  TokenCount,
-  RelativeTime,
-  Countdown,
-  LabelChip,
-  EventBadge,
-  SessionId,
-  SectionHeader,
-  StatCard,
-} from "@/components/ui-atoms"
-import {
-  AreaChart,
   Area,
+  AreaChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
   XAxis,
   YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
 } from "recharts"
-import Link from "next/link"
-import { ArrowLeft, ExternalLink, Terminal, Clock, AlertTriangle, CheckCircle2, RefreshCw } from "lucide-react"
+import {
+  AlertTriangle,
+  ArrowLeft,
+  Clock,
+  ExternalLink,
+  RefreshCw,
+  Terminal,
+  CheckCircle2,
+} from "lucide-react"
 import { format } from "date-fns"
+import { fetchIssueDetail } from "@/lib/api/client"
+import type { IssueDetail as IssueDetailPayload } from "@/lib/api/schemas"
+import {
+  ClaimBadge,
+  Countdown,
+  EventBadge,
+  LabelChip,
+  PhaseBadge,
+  PriorityDot,
+  RelativeTime,
+  SessionId,
+  StatCard,
+  TokenCount,
+} from "@/components/ui-atoms"
 
 function formatTime(iso: string) {
   return format(new Date(iso), "HH:mm")
 }
 
-export function AgentDetail({ agent }: { agent: IssueDetail }) {
-  const r = agent.running
+export function AgentDetail({ issueIdentifier }: { issueIdentifier: string }) {
+  const [agent, setAgent] = useState<IssueDetailPayload | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const loadIssue = useCallback(async () => {
+    try {
+      const payload = await fetchIssueDetail(issueIdentifier)
+      setAgent(payload)
+      setError(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed loading issue detail")
+    } finally {
+      setIsLoading(false)
+    }
+  }, [issueIdentifier])
+
+  useEffect(() => {
+    setIsLoading(true)
+    void loadIssue()
+
+    const interval = setInterval(() => {
+      void loadIssue()
+    }, 5000)
+
+    return () => clearInterval(interval)
+  }, [loadIssue])
+
+  if (isLoading) {
+    return <div className="px-6 py-10 text-sm text-muted-foreground">Loading issue detail...</div>
+  }
+
+  if (!agent) {
+    return (
+      <div className="px-6 py-10">
+        <div className="bg-error/10 border border-error/30 rounded-lg px-4 py-3 text-sm text-error-foreground">
+          {error || "Issue not found"}
+        </div>
+      </div>
+    )
+  }
+
+  const running = agent.running
 
   return (
     <div className="px-6 py-6 max-w-6xl mx-auto space-y-6">
-      {/* Back + header */}
       <div>
         <Link
           href="/agents"
@@ -51,50 +100,62 @@ export function AgentDetail({ agent }: { agent: IssueDetail }) {
             <div>
               <div className="flex items-center gap-2.5 flex-wrap">
                 <span className="font-mono text-lg font-semibold text-primary">{agent.issue_identifier}</span>
-                <ClaimBadge status={agent.status} />
-                {r && <PhaseBadge phase={r.phase} />}
+                <ClaimBadge status={agent.status === "running" ? "Running" : "RetryQueued"} />
+                {running && <PhaseBadge phase={running.phase} />}
               </div>
               <h1 className="text-base font-medium text-foreground mt-1 leading-snug max-w-2xl">
-                {agent.title}
+                {agent.title || agent.tracker_state || "Untitled issue"}
               </h1>
               <div className="flex items-center gap-2 mt-2 flex-wrap">
-                {agent.labels.map((l) => <LabelChip key={l} label={l} />)}
-                <span className="text-[10px] text-muted-foreground font-mono ml-1">{agent.tracker_state}</span>
+                {agent.labels.map((label) => (
+                  <LabelChip key={label} label={label} />
+                ))}
+                {agent.tracker_state && (
+                  <span className="text-[10px] text-muted-foreground font-mono ml-1">
+                    {agent.tracker_state}
+                  </span>
+                )}
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <button className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground border border-border px-3 py-1.5 rounded-md transition-colors hover:bg-accent">
+          {agent.url && (
+            <a
+              href={agent.url}
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground border border-border px-3 py-1.5 rounded-md transition-colors hover:bg-accent"
+            >
               <ExternalLink className="w-3.5 h-3.5" />
               Open in Linear
-            </button>
-          </div>
+            </a>
+          )}
         </div>
       </div>
 
-      {/* Description */}
+      {error && (
+        <div className="bg-error/10 border border-error/30 rounded-lg px-4 py-3 text-xs text-error-foreground font-mono">
+          {error}
+        </div>
+      )}
+
       <div className="bg-card border border-border rounded-lg p-4">
         <div className="text-xs text-muted-foreground uppercase tracking-wider mb-2">Issue Description</div>
-        <p className="text-sm text-foreground leading-relaxed">{agent.description}</p>
+        <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">
+          {agent.description || "No description available."}
+        </p>
       </div>
 
-      {/* Metrics row */}
-      {r ? (
+      {running ? (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <StatCard
-            label="Current turn"
-            value={r.turn_count}
-            sub="turns in session"
-            accent="running"
-          />
+          <StatCard label="Current turn" value={running.turn_count} sub="turns in session" accent="running" />
           <StatCard
             label="Total tokens"
-            value={<TokenCount value={r.tokens.total_tokens} />}
-            sub={`${(r.tokens.input_tokens / 1000).toFixed(1)}K in · ${(r.tokens.output_tokens / 1000).toFixed(1)}K out`}
+            value={<TokenCount value={running.tokens.total_tokens} />}
+            sub={`${(running.tokens.input_tokens / 1000).toFixed(1)}K in · ${(running.tokens.output_tokens / 1000).toFixed(1)}K out`}
           />
           <StatCard
             label="Session started"
-            value={<RelativeTime iso={r.started_at} />}
+            value={<RelativeTime iso={running.started_at} />}
             sub={`attempt ${agent.attempts.current_retry_attempt ?? "first"}`}
           />
           <StatCard
@@ -112,18 +173,13 @@ export function AgentDetail({ agent }: { agent: IssueDetail }) {
         </div>
       ) : null}
 
-      {/* Main two-column layout */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Left: Event stream */}
         <div className="lg:col-span-2 space-y-4">
-          {/* Token history chart */}
           {agent.token_history.length > 1 && (
             <div className="bg-card border border-border rounded-lg p-4">
               <div className="flex items-center justify-between mb-3">
                 <div className="text-xs text-muted-foreground uppercase tracking-wider">Token Usage Over Time</div>
-                {r && (
-                  <TokenCount value={r.tokens.total_tokens} label="total" />
-                )}
+                {running && <TokenCount value={running.tokens.total_tokens} label="total" />}
               </div>
               <ResponsiveContainer width="100%" height={140}>
                 <AreaChart data={agent.token_history} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
@@ -149,7 +205,12 @@ export function AgentDetail({ agent }: { agent: IssueDetail }) {
                     tickLine={false}
                   />
                   <Tooltip
-                    contentStyle={{ background: "oklch(0.155 0.01 264)", border: "1px solid oklch(0.24 0.012 264)", borderRadius: "6px", fontSize: "11px" }}
+                    contentStyle={{
+                      background: "oklch(0.155 0.01 264)",
+                      border: "1px solid oklch(0.24 0.012 264)",
+                      borderRadius: "6px",
+                      fontSize: "11px",
+                    }}
                     labelFormatter={(v) => formatTime(String(v))}
                     formatter={(v: number) => [`${(v / 1000).toFixed(1)}K tokens`, "Total"]}
                   />
@@ -166,14 +227,13 @@ export function AgentDetail({ agent }: { agent: IssueDetail }) {
             </div>
           )}
 
-          {/* Event stream */}
           <div className="bg-card border border-border rounded-lg overflow-hidden">
             <div className="flex items-center justify-between px-4 py-3 border-b border-border">
               <div className="flex items-center gap-2">
                 <Terminal className="w-4 h-4 text-muted-foreground" />
                 <span className="text-sm font-medium text-foreground">Event Stream</span>
               </div>
-              {r && (
+              {running && (
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <span className="w-1.5 h-1.5 rounded-full bg-running pulse-dot" />
                   Live
@@ -184,18 +244,20 @@ export function AgentDetail({ agent }: { agent: IssueDetail }) {
               {agent.recent_events.length === 0 ? (
                 <div className="px-4 py-8 text-center text-sm text-muted-foreground">No events recorded</div>
               ) : (
-                agent.recent_events.map((ev, i) => (
-                  <div key={i} className="flex items-start gap-3 px-4 py-3 hover:bg-accent/20 transition-colors">
+                agent.recent_events.map((event, index) => (
+                  <div key={`${event.at}-${index}`} className="flex items-start gap-3 px-4 py-3 hover:bg-accent/20 transition-colors">
                     <div className="flex-shrink-0 mt-0.5">
-                      <EventIcon event={ev.event} />
+                      <EventIcon event={event.event} />
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <EventBadge event={ev.event} />
-                        <RelativeTime iso={ev.at} />
+                        <EventBadge event={event.event} />
+                        <RelativeTime iso={event.at} />
                       </div>
-                      {ev.message && (
-                        <p className="text-xs text-muted-foreground mt-0.5 font-mono leading-relaxed">{ev.message}</p>
+                      {event.message && (
+                        <p className="text-xs text-muted-foreground mt-0.5 font-mono leading-relaxed">
+                          {event.message}
+                        </p>
                       )}
                     </div>
                   </div>
@@ -205,20 +267,17 @@ export function AgentDetail({ agent }: { agent: IssueDetail }) {
           </div>
         </div>
 
-        {/* Right: Session details */}
         <div className="space-y-4">
-          {/* Session info */}
-          {r && (
+          {running && (
             <div className="bg-card border border-border rounded-lg p-4 space-y-3">
               <div className="text-xs text-muted-foreground uppercase tracking-wider">Session</div>
-              <InfoRow label="Session ID" value={<SessionId id={r.session_id} />} />
-              <InfoRow label="Phase" value={<PhaseBadge phase={r.phase} />} />
-              <InfoRow label="Last event" value={<RelativeTime iso={r.last_event_at} />} />
-              <InfoRow label="Turns" value={<span className="font-mono text-sm">{r.turn_count}</span>} />
+              <InfoRow label="Session ID" value={<SessionId id={running.session_id} />} />
+              <InfoRow label="Phase" value={<PhaseBadge phase={running.phase} />} />
+              <InfoRow label="Last event" value={<RelativeTime iso={running.last_event_at} />} />
+              <InfoRow label="Turns" value={<span className="font-mono text-sm">{running.turn_count}</span>} />
             </div>
           )}
 
-          {/* Workspace */}
           <div className="bg-card border border-border rounded-lg p-4 space-y-3">
             <div className="text-xs text-muted-foreground uppercase tracking-wider">Workspace</div>
             <div className="font-mono text-xs text-foreground bg-muted rounded px-2.5 py-2 break-all">
@@ -233,7 +292,6 @@ export function AgentDetail({ agent }: { agent: IssueDetail }) {
             )}
           </div>
 
-          {/* Error state */}
           {agent.last_error && (
             <div className="bg-error/10 border border-error/30 rounded-lg p-4">
               <div className="flex items-center gap-2 mb-2">
@@ -244,7 +302,6 @@ export function AgentDetail({ agent }: { agent: IssueDetail }) {
             </div>
           )}
 
-          {/* Retry info */}
           {agent.retry && (
             <div className="bg-warning/10 border border-warning/30 rounded-lg p-4 space-y-2">
               <div className="flex items-center gap-2 mb-1">
@@ -256,22 +313,11 @@ export function AgentDetail({ agent }: { agent: IssueDetail }) {
             </div>
           )}
 
-          {/* Token breakdown */}
-          {r && (
+          {running && (
             <div className="bg-card border border-border rounded-lg p-4 space-y-3">
               <div className="text-xs text-muted-foreground uppercase tracking-wider">Token Breakdown</div>
-              <TokenBreakdown
-                label="Input"
-                value={r.tokens.input_tokens}
-                total={r.tokens.total_tokens}
-                color="oklch(0.62 0.22 268)"
-              />
-              <TokenBreakdown
-                label="Output"
-                value={r.tokens.output_tokens}
-                total={r.tokens.total_tokens}
-                color="oklch(0.72 0.19 155)"
-              />
+              <TokenBreakdown label="Input" value={running.tokens.input_tokens} total={running.tokens.total_tokens} color="oklch(0.62 0.22 268)" />
+              <TokenBreakdown label="Output" value={running.tokens.output_tokens} total={running.tokens.total_tokens} color="oklch(0.72 0.19 155)" />
             </div>
           )}
         </div>
@@ -291,6 +337,7 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
 
 function TokenBreakdown({ label, value, total, color }: { label: string; value: number; total: number; color: string }) {
   const pct = total > 0 ? Math.round((value / total) * 100) : 0
+
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between text-xs">
@@ -307,18 +354,18 @@ function TokenBreakdown({ label, value, total, color }: { label: string; value: 
   )
 }
 
-function EventIcon({ event }: { event: string }) {
+function EventIcon({ event }: { event: string | null | undefined }) {
   if (event === "turn_completed" || event === "session_started") {
     return <CheckCircle2 className="w-3.5 h-3.5 text-running" />
   }
-  if (event.includes("failed") || event.includes("error")) {
+
+  if (event?.includes("failed") || event?.includes("error")) {
     return <AlertTriangle className="w-3.5 h-3.5 text-error-foreground" />
   }
+
   if (event === "turn_input_required") {
     return <AlertTriangle className="w-3.5 h-3.5 text-warning" />
   }
-  if (event === "approval_auto_approved") {
-    return <CheckCircle2 className="w-3.5 h-3.5 text-muted-foreground" />
-  }
+
   return <Clock className="w-3.5 h-3.5 text-muted-foreground" />
 }

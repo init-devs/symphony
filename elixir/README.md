@@ -161,17 +161,30 @@ runtime:
 ```
 
 - If `WORKFLOW.md` is missing or has invalid YAML, startup and scheduling are halted until fixed.
-- `server.port` or CLI `--port` enables the optional Phoenix LiveView dashboard and JSON API at
-  `/`, `/api/v1/state`, `/api/v1/<issue_identifier>`, `/api/v1/refresh`, `/api/v1/activity`, and `/api/v1/activity/stream`.
+- `server.port` or CLI `--port` enables the optional Phoenix HTTP API at `/api/v1/*`.
 
-## Web dashboard
+## Observability API and dashboard
 
-The observability UI now runs on a minimal Phoenix stack:
+The Elixir service exposes a JSON/SSE API for observability under `/api/v1/*`:
 
-- LiveView for the dashboard at `/`
-- JSON API for operational debugging under `/api/v1/*`
-- Bandit as the HTTP server
-- Phoenix dependency static assets for the LiveView client bootstrap
+- `GET /api/v1/state`
+- `GET /api/v1/issues`
+- `GET /api/v1/<issue_identifier>`
+- `POST /api/v1/refresh`
+- `GET /api/v1/activity`
+- `GET /api/v1/activity/stream` (SSE)
+- `GET /api/v1/config`
+- `GET /api/v1/openapi.yaml`
+
+`agents-web` is the primary dashboard. Run it separately and point it at this service:
+
+```bash
+cd ../agents-web
+npm install
+SYMPHONY_API_ORIGIN=http://127.0.0.1:4000 npm run dev
+```
+
+The frontend proxies `/api/v1/*` through Next.js rewrites, so browser calls stay same-origin.
 
 ## Project Layout
 
@@ -180,6 +193,7 @@ The observability UI now runs on a minimal Phoenix stack:
 - `WORKFLOW.md`: in-repo workflow contract used by local runs
 - `../.codex/`: repository-local skills and setup helpers
 - `docs/runtime_adapter.md`: runtime abstraction, OpenCode backend, and activity stream details
+- `docs/observability_tradeoffs.md`: dashboard security/deployment tradeoffs and deferred hardening
 
 ## Testing
 

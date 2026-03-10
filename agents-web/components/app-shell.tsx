@@ -12,7 +12,7 @@ import {
   ChevronRight,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { MOCK_SYSTEM_STATE } from "@/lib/mock-data"
+import { ObservabilityProvider, useObservability } from "@/components/observability-provider"
 
 const navItems = [
   { href: "/", icon: LayoutDashboard, label: "Overview" },
@@ -23,9 +23,20 @@ const navItems = [
 ]
 
 export function AppShell({ children }: { children: React.ReactNode }) {
+  return (
+    <ObservabilityProvider>
+      <AppShellFrame>{children}</AppShellFrame>
+    </ObservabilityProvider>
+  )
+}
+
+function AppShellFrame({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
-  const running = MOCK_SYSTEM_STATE.counts.running
-  const retrying = MOCK_SYSTEM_STATE.counts.retrying
+  const { state, streamStatus } = useObservability()
+  const running = state?.counts.running ?? 0
+  const retrying = state?.counts.retrying ?? 0
+  const pollIntervalSeconds = Math.round((state?.polling.poll_interval_ms ?? 0) / 1000)
+  const serviceLabel = streamStatus === "open" ? "Live stream" : streamStatus === "error" ? "Stream reconnecting" : "Connecting"
 
   return (
     <div className="flex h-screen bg-background overflow-hidden">
@@ -76,11 +87,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="px-4 py-3 border-t border-border">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <span className="w-1.5 h-1.5 rounded-full bg-running pulse-dot flex-shrink-0" />
-            <span>Service running</span>
+            <span>{serviceLabel}</span>
           </div>
-          <div className="mt-1 text-[10px] font-mono text-muted-foreground/60">
-            Poll: {(MOCK_SYSTEM_STATE.poll_interval_ms / 1000).toFixed(0)}s interval
-          </div>
+          {pollIntervalSeconds > 0 && (
+            <div className="mt-1 text-[10px] font-mono text-muted-foreground/60">
+              Poll: {pollIntervalSeconds}s interval
+            </div>
+          )}
         </div>
       </aside>
 

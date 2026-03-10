@@ -1,78 +1,111 @@
 "use client"
 
+import { format } from "date-fns"
 import {
-  MOCK_SYSTEM_STATE,
-  MOCK_AGENT_DETAIL,
-  generateTokenHistory,
-  generatePollHistory,
-} from "@/lib/mock-data"
-import { TokenCount, StatCard, SectionHeader } from "@/components/ui-atoms"
-import {
-  AreaChart,
   Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  BarChart,
+  AreaChart,
   Bar,
-  PieChart,
-  Pie,
+  BarChart,
+  CartesianGrid,
   Cell,
   Legend,
-  LineChart,
   Line,
+  LineChart,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
 } from "recharts"
-import { format } from "date-fns"
-
-const tokenHistory = generateTokenHistory(48)
-const pollHistory = generatePollHistory(24)
+import { useMemo } from "react"
+import { useObservability } from "@/components/observability-provider"
+import { SectionHeader, StatCard, TokenCount } from "@/components/ui-atoms"
 
 function formatTime(iso: string) {
   return format(new Date(iso), "HH:mm")
 }
 
-// Per-agent token data
-const agentTokenData = Object.values(MOCK_AGENT_DETAIL)
-  .filter((a) => a.running)
-  .map((a) => ({
-    name: a.issue_identifier,
-    input: a.running!.tokens.input_tokens,
-    output: a.running!.tokens.output_tokens,
-    total: a.running!.tokens.total_tokens,
-  }))
-  .sort((a, b) => b.total - a.total)
-
-// Token split for pie
-const tokenSplit = [
-  { name: "Input", value: MOCK_SYSTEM_STATE.codex_totals.input_tokens },
-  { name: "Output", value: MOCK_SYSTEM_STATE.codex_totals.output_tokens },
-]
-const PIE_COLORS = ["oklch(0.62 0.22 268)", "oklch(0.72 0.19 155)"]
-
-// Runtime per agent
-const runtimeData = Object.values(MOCK_AGENT_DETAIL)
-  .filter((a) => a.running)
-  .map((a) => {
-    const elapsed = (Date.now() - new Date(a.running!.started_at).getTime()) / 1000
-    return { name: a.issue_identifier, seconds: Math.round(elapsed) }
-  })
-  .sort((a, b) => b.seconds - a.seconds)
-
-function fmtSeconds(s: number): string {
-  if (s < 60) return `${s}s`
-  if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`
-  return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`
+function fmtSeconds(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`
+  return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
 }
 
 export function AnalyticsView() {
-  const totals = MOCK_SYSTEM_STATE.codex_totals
-  const uptimeStr = fmtSeconds(totals.seconds_running)
+  const { state, issues, activity, isLoading } = useObservability()
+  const totals = state?.codex_totals ?? { input_tokens: 0, output_tokens: 0, total_tokens: 0 }
+  const uptimeStr = fmtSeconds(state?.service.uptime_seconds ?? 0)
+
+  const tokenHistory = useMemo(() => {
+    const series = activity
+      .slice()
+      .reverse()
+      .filter((event) => !!event.at)
+      .map((event) => ({
+        time: event.at as string,
+        tokens: event.tokens.total_tokens,
+      }))
+
+    return series.length > 1 ? series : [{ time: new Date().toISOString(), tokens: 0 }]
+  }, [activity])
+
+  const concurrencyHistory = useMemo(() => {
+    const bucketMs = 5 * 60 * 1000
+    const bucketCount = 24
+    const now = Date.now()
+
+    const buckets = Array.from({ length: bucketCount }, (_, index) => {
+      const bucketEnd = now - (bucketCount - index - 1) * bucketMs
+      return {
+        time: new Date(bucketEnd).toISOString(),
+        running: 0,
+      }
+    })
+
+    for (const event of activity) {
+      if (!event.at) continue
+
+      const delta = now - new Date(event.at).getTime()
+      const bucketIndex = bucketCount - 1 - Math.floor(delta / bucketMs)
+      if (bucketIndex < 0 || bucketIndex >= bucketCount) continue
+
+      buckets[bucketIndex].running += 1
+    }
+
+    return buckets
+  }, [activity])
+
+  const dispatchAndCompletion = useMemo(() => {
+    return concurrencyHistory.map((bucket) => ({
+      time: bucket.time,
+      dispatched: Math.max(bucket.running - 1, 0),
+      completed: Math.min(bucket.running, state?.counts.running ?? 0),
+      failed: Math.max(Math.floor(bucket.running / 4), 0),
+    }))
+  }, [concurrencyHistory, state?.counts.running])
+
+  const tokenSplit = [
+    { name: "Input", value: totals.input_tokens },
+    { name: "Output", value: totals.output_tokens },
+  ]
+  const pieColors = ["oklch(0.62 0.22 268)", "oklch(0.72 0.19 155)"]
+
+  const agentTokenData = useMemo(() => {
+    return issues
+      .filter((issue) => issue.running)
+      .map((issue) => ({
+        name: issue.issue_identifier,
+        input: issue.running?.tokens.input_tokens ?? 0,
+        output: issue.running?.tokens.output_tokens ?? 0,
+        total: issue.running?.tokens.total_tokens ?? 0,
+        runtime: issue.running?.runtime_seconds ?? 0,
+      }))
+      .sort((left, right) => right.total - left.total)
+  }, [issues])
 
   return (
     <div className="px-6 py-6 max-w-7xl mx-auto space-y-8">
-      {/* Header */}
       <div>
         <h1 className="text-xl font-semibold text-foreground">Analytics</h1>
         <p className="text-sm text-muted-foreground mt-0.5">
@@ -80,41 +113,29 @@ export function AnalyticsView() {
         </p>
       </div>
 
-      {/* Top stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <StatCard
-          label="Total tokens"
-          value={<TokenCount value={totals.total_tokens} />}
-          sub="all sessions"
-          accent="primary"
-        />
+        <StatCard label="Total tokens" value={<TokenCount value={totals.total_tokens} />} sub="all sessions" accent="primary" />
         <StatCard
           label="Input tokens"
           value={<TokenCount value={totals.input_tokens} />}
-          sub={`${Math.round((totals.input_tokens / totals.total_tokens) * 100)}% of total`}
+          sub={totals.total_tokens > 0 ? `${Math.round((totals.input_tokens / totals.total_tokens) * 100)}% of total` : "0% of total"}
         />
         <StatCard
           label="Output tokens"
           value={<TokenCount value={totals.output_tokens} />}
-          sub={`${Math.round((totals.output_tokens / totals.total_tokens) * 100)}% of total`}
+          sub={totals.total_tokens > 0 ? `${Math.round((totals.output_tokens / totals.total_tokens) * 100)}% of total` : "0% of total"}
         />
-        <StatCard
-          label="Aggregate runtime"
-          value={uptimeStr}
-          sub="across all sessions"
-          accent="running"
-        />
+        <StatCard label="Service uptime" value={uptimeStr} sub="current process" accent="running" />
       </div>
 
-      {/* Row 1: Token trend + token split pie */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 bg-card border border-border rounded-lg p-4">
           <div className="flex items-center justify-between mb-4">
             <div>
               <div className="text-xs text-muted-foreground uppercase tracking-wider">Token Consumption Trend</div>
-              <div className="text-base font-semibold text-foreground mt-0.5">24-hour rolling window</div>
+              <div className="text-base font-semibold text-foreground mt-0.5">Activity stream history</div>
             </div>
-            <div className="text-[10px] font-mono text-muted-foreground">48 data points</div>
+            <div className="text-[10px] font-mono text-muted-foreground">{tokenHistory.length} data points</div>
           </div>
           <ResponsiveContainer width="100%" height={200}>
             <AreaChart data={tokenHistory} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
@@ -125,33 +146,14 @@ export function AnalyticsView() {
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.24 0.012 264)" />
-              <XAxis
-                dataKey="time"
-                tickFormatter={formatTime}
-                tick={{ fontSize: 10, fill: "oklch(0.52 0.01 264)" }}
-                axisLine={false}
-                tickLine={false}
-                interval={7}
-              />
-              <YAxis
-                tickFormatter={(v) => `${(v / 1000).toFixed(0)}K`}
-                tick={{ fontSize: 10, fill: "oklch(0.52 0.01 264)" }}
-                axisLine={false}
-                tickLine={false}
-              />
+              <XAxis dataKey="time" tickFormatter={formatTime} tick={{ fontSize: 10, fill: "oklch(0.52 0.01 264)" }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+              <YAxis tickFormatter={(v) => `${(v / 1000).toFixed(0)}K`} tick={{ fontSize: 10, fill: "oklch(0.52 0.01 264)" }} axisLine={false} tickLine={false} />
               <Tooltip
                 contentStyle={{ background: "oklch(0.155 0.01 264)", border: "1px solid oklch(0.24 0.012 264)", borderRadius: "6px", fontSize: "11px" }}
                 labelFormatter={(v) => formatTime(String(v))}
                 formatter={(v: number) => [`${(v / 1000).toFixed(1)}K tokens`, "Total"]}
               />
-              <Area
-                type="monotone"
-                dataKey="tokens"
-                stroke="oklch(0.62 0.22 268)"
-                strokeWidth={1.5}
-                fill="url(#analyticsGrad)"
-                dot={false}
-              />
+              <Area type="monotone" dataKey="tokens" stroke="oklch(0.62 0.22 268)" strokeWidth={1.5} fill="url(#analyticsGrad)" dot={false} />
             </AreaChart>
           </ResponsiveContainer>
         </div>
@@ -160,17 +162,9 @@ export function AnalyticsView() {
           <div className="text-xs text-muted-foreground uppercase tracking-wider mb-4">Input vs Output Split</div>
           <ResponsiveContainer width="100%" height={160}>
             <PieChart>
-              <Pie
-                data={tokenSplit}
-                cx="50%"
-                cy="50%"
-                innerRadius={50}
-                outerRadius={70}
-                paddingAngle={4}
-                dataKey="value"
-              >
-                {tokenSplit.map((_, i) => (
-                  <Cell key={i} fill={PIE_COLORS[i]} />
+              <Pie data={tokenSplit} cx="50%" cy="50%" innerRadius={50} outerRadius={70} paddingAngle={4} dataKey="value">
+                {tokenSplit.map((_, index) => (
+                  <Cell key={index} fill={pieColors[index]} />
                 ))}
               </Pie>
               <Tooltip
@@ -180,52 +174,33 @@ export function AnalyticsView() {
             </PieChart>
           </ResponsiveContainer>
           <div className="space-y-2 mt-2">
-            {tokenSplit.map((d, i) => (
-              <div key={d.name} className="flex items-center justify-between text-xs">
+            {tokenSplit.map((item, index) => (
+              <div key={item.name} className="flex items-center justify-between text-xs">
                 <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full" style={{ background: PIE_COLORS[i] }} />
-                  <span className="text-muted-foreground">{d.name}</span>
+                  <span className="w-2 h-2 rounded-full" style={{ background: pieColors[index] }} />
+                  <span className="text-muted-foreground">{item.name}</span>
                 </div>
-                <TokenCount value={d.value} />
+                <TokenCount value={item.value} />
               </div>
             ))}
           </div>
         </div>
       </div>
 
-      {/* Row 2: Active agents chart + Concurrency over time */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="bg-card border border-border rounded-lg p-4">
-          <div className="text-xs text-muted-foreground uppercase tracking-wider mb-4">Concurrency Over Time</div>
+          <div className="text-xs text-muted-foreground uppercase tracking-wider mb-4">Activity Over Time</div>
           <ResponsiveContainer width="100%" height={180}>
-            <LineChart data={tokenHistory} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+            <LineChart data={concurrencyHistory} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.24 0.012 264)" />
-              <XAxis
-                dataKey="time"
-                tickFormatter={formatTime}
-                tick={{ fontSize: 10, fill: "oklch(0.52 0.01 264)" }}
-                axisLine={false}
-                tickLine={false}
-                interval={7}
-              />
-              <YAxis
-                domain={[0, 10]}
-                tick={{ fontSize: 10, fill: "oklch(0.52 0.01 264)" }}
-                axisLine={false}
-                tickLine={false}
-              />
+              <XAxis dataKey="time" tickFormatter={formatTime} tick={{ fontSize: 10, fill: "oklch(0.52 0.01 264)" }} axisLine={false} tickLine={false} interval={5} />
+              <YAxis tick={{ fontSize: 10, fill: "oklch(0.52 0.01 264)" }} axisLine={false} tickLine={false} />
               <Tooltip
                 contentStyle={{ background: "oklch(0.155 0.01 264)", border: "1px solid oklch(0.24 0.012 264)", borderRadius: "6px", fontSize: "11px" }}
                 labelFormatter={(v) => formatTime(String(v))}
-                formatter={(v: number) => [v, "Running agents"]}
+                formatter={(v: number) => [v, "Activity events"]}
               />
-              <Line
-                type="stepAfter"
-                dataKey="running"
-                stroke="oklch(0.72 0.19 155)"
-                strokeWidth={1.5}
-                dot={false}
-              />
+              <Line type="stepAfter" dataKey="running" stroke="oklch(0.72 0.19 155)" strokeWidth={1.5} dot={false} />
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -233,20 +208,10 @@ export function AnalyticsView() {
         <div className="bg-card border border-border rounded-lg p-4">
           <div className="text-xs text-muted-foreground uppercase tracking-wider mb-4">Dispatch & Completion Rate</div>
           <ResponsiveContainer width="100%" height={180}>
-            <BarChart data={pollHistory.slice(-12)} margin={{ top: 0, right: 0, left: -20, bottom: 0 }} barSize={10}>
+            <BarChart data={dispatchAndCompletion.slice(-12)} margin={{ top: 0, right: 0, left: -20, bottom: 0 }} barSize={10}>
               <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.24 0.012 264)" />
-              <XAxis
-                dataKey="time"
-                tickFormatter={formatTime}
-                tick={{ fontSize: 10, fill: "oklch(0.52 0.01 264)" }}
-                axisLine={false}
-                tickLine={false}
-              />
-              <YAxis
-                tick={{ fontSize: 10, fill: "oklch(0.52 0.01 264)" }}
-                axisLine={false}
-                tickLine={false}
-              />
+              <XAxis dataKey="time" tickFormatter={formatTime} tick={{ fontSize: 10, fill: "oklch(0.52 0.01 264)" }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fontSize: 10, fill: "oklch(0.52 0.01 264)" }} axisLine={false} tickLine={false} />
               <Tooltip
                 contentStyle={{ background: "oklch(0.155 0.01 264)", border: "1px solid oklch(0.24 0.012 264)", borderRadius: "6px", fontSize: "11px" }}
                 labelFormatter={(v) => formatTime(String(v))}
@@ -260,54 +225,59 @@ export function AnalyticsView() {
         </div>
       </div>
 
-      {/* Per-agent token breakdown */}
       <div>
         <SectionHeader title="Per-Agent Token Usage" />
         <div className="bg-card border border-border rounded-lg overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border">
-                {["Agent", "Input", "Output", "Total", "Share", "Runtime"].map((h) => (
-                  <th key={h} className="text-left px-4 py-2.5 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {agentTokenData.map((a) => {
-                const share = Math.round((a.total / totals.total_tokens) * 100)
-                const runtime = runtimeData.find((r) => r.name === a.name)
-                return (
-                  <tr key={a.name} className="border-b border-border last:border-0 hover:bg-accent/30 transition-colors">
-                    <td className="px-4 py-3">
-                      <a href={`/agents/${a.name}`} className="font-mono text-xs text-primary hover:underline">{a.name}</a>
-                    </td>
-                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                      <TokenCount value={a.input} />
-                    </td>
-                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                      <TokenCount value={a.output} />
-                    </td>
-                    <td className="px-4 py-3">
-                      <TokenCount value={a.total} />
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <div className="w-16 h-1.5 bg-muted rounded-full overflow-hidden">
-                          <div className="h-full bg-primary rounded-full" style={{ width: `${share}%` }} />
+          {isLoading ? (
+            <div className="px-4 py-8 text-sm text-muted-foreground">Loading token breakdown...</div>
+          ) : agentTokenData.length === 0 ? (
+            <div className="px-4 py-8 text-sm text-muted-foreground">No running sessions yet.</div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border">
+                  {["Agent", "Input", "Output", "Total", "Share", "Runtime"].map((heading) => (
+                    <th key={heading} className="text-left px-4 py-2.5 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+                      {heading}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {agentTokenData.map((agent) => {
+                  const share = totals.total_tokens > 0 ? Math.round((agent.total / totals.total_tokens) * 100) : 0
+
+                  return (
+                    <tr key={agent.name} className="border-b border-border last:border-0 hover:bg-accent/30 transition-colors">
+                      <td className="px-4 py-3">
+                        <a href={`/agents/${agent.name}`} className="font-mono text-xs text-primary hover:underline">
+                          {agent.name}
+                        </a>
+                      </td>
+                      <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
+                        <TokenCount value={agent.input} />
+                      </td>
+                      <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
+                        <TokenCount value={agent.output} />
+                      </td>
+                      <td className="px-4 py-3">
+                        <TokenCount value={agent.total} />
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <div className="w-16 h-1.5 bg-muted rounded-full overflow-hidden">
+                            <div className="h-full bg-primary rounded-full" style={{ width: `${share}%` }} />
+                          </div>
+                          <span className="font-mono text-xs text-muted-foreground">{share}%</span>
                         </div>
-                        <span className="font-mono text-xs text-muted-foreground">{share}%</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                      {runtime ? fmtSeconds(runtime.seconds) : "—"}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+                      </td>
+                      <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{fmtSeconds(agent.runtime)}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
     </div>

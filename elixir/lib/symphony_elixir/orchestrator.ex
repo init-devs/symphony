@@ -29,6 +29,7 @@ defmodule SymphonyElixir.Orchestrator do
     """
 
     defstruct [
+      :started_at,
       :poll_interval_ms,
       :max_concurrent_agents,
       :next_poll_due_at_ms,
@@ -54,6 +55,7 @@ defmodule SymphonyElixir.Orchestrator do
     now_ms = System.monotonic_time(:millisecond)
 
     state = %State{
+      started_at: DateTime.utc_now(),
       poll_interval_ms: Config.poll_interval_ms(),
       max_concurrent_agents: Config.max_concurrent_agents(),
       next_poll_due_at_ms: now_ms,
@@ -114,6 +116,7 @@ defmodule SymphonyElixir.Orchestrator do
               |> complete_issue(issue_id)
               |> schedule_issue_retry(issue_id, 1, %{
                 identifier: running_entry.identifier,
+                issue: Map.get(running_entry, :issue),
                 delay_type: :continuation
               })
 
@@ -124,6 +127,7 @@ defmodule SymphonyElixir.Orchestrator do
 
               schedule_issue_retry(state, issue_id, next_attempt, %{
                 identifier: running_entry.identifier,
+                issue: Map.get(running_entry, :issue),
                 error: "agent exited: #{inspect(reason)}"
               })
           end
@@ -428,6 +432,7 @@ defmodule SymphonyElixir.Orchestrator do
       |> terminate_running_issue(issue_id, false)
       |> schedule_issue_retry(issue_id, next_attempt, %{
         identifier: identifier,
+        issue: Map.get(running_entry, :issue),
         error: "stalled for #{elapsed_ms}ms without codex activity"
       })
     else
@@ -671,6 +676,7 @@ defmodule SymphonyElixir.Orchestrator do
 
         schedule_issue_retry(state, issue.id, next_attempt, %{
           identifier: issue.identifier,
+          issue: issue,
           error: "failed to spawn agent: #{inspect(reason)}"
         })
     end
@@ -732,6 +738,7 @@ defmodule SymphonyElixir.Orchestrator do
             timer_ref: timer_ref,
             due_at_ms: due_at_ms,
             identifier: identifier,
+            issue: Map.get(metadata, :issue),
             error: error
           })
     }
@@ -742,6 +749,7 @@ defmodule SymphonyElixir.Orchestrator do
       %{attempt: attempt} = retry_entry ->
         metadata = %{
           identifier: Map.get(retry_entry, :identifier),
+          issue: Map.get(retry_entry, :issue),
           error: Map.get(retry_entry, :error)
         }
 
@@ -837,10 +845,11 @@ defmodule SymphonyElixir.Orchestrator do
          issue.id,
          attempt + 1,
          Map.merge(metadata, %{
-           identifier: issue.identifier,
-           error: "no available orchestrator slots"
-         })
-       )}
+            identifier: issue.identifier,
+            issue: issue,
+            error: "no available orchestrator slots"
+          })
+        )}
     end
   end
 
@@ -992,15 +1001,19 @@ defmodule SymphonyElixir.Orchestrator do
           attempt: attempt,
           due_in_ms: max(0, due_at_ms - now_ms),
           identifier: Map.get(retry, :identifier),
+          issue: Map.get(retry, :issue),
           error: Map.get(retry, :error)
         }
       end)
 
     {:reply,
      %{
-       running: running,
-       retrying: retrying,
-       codex_totals: state.codex_totals,
+       started_at: state.started_at,
+        max_concurrent_agents: state.max_concurrent_agents,
+        completed_count: MapSet.size(state.completed),
+        running: running,
+        retrying: retrying,
+        codex_totals: state.codex_totals,
        rate_limits: Map.get(state, :codex_rate_limits),
        polling: %{
          checking?: state.poll_check_in_progress == true,

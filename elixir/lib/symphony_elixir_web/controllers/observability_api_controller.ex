@@ -8,9 +8,16 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
   alias Plug.Conn
   alias SymphonyElixirWeb.{Endpoint, ObservabilityPubSub, Presenter}
 
+  @openapi_spec_path Path.expand("../../../priv/openapi/observability.v1.yaml", __DIR__)
+
   @spec state(Conn.t(), map()) :: Conn.t()
   def state(conn, _params) do
     json(conn, Presenter.state_payload(orchestrator(), snapshot_timeout_ms()))
+  end
+
+  @spec issues(Conn.t(), map()) :: Conn.t()
+  def issues(conn, _params) do
+    json(conn, Presenter.issues_payload(orchestrator(), snapshot_timeout_ms()))
   end
 
   @spec issue(Conn.t(), map()) :: Conn.t()
@@ -42,6 +49,24 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
     limit = parse_limit(Map.get(params, "limit"), 100)
     issue_identifier = Map.get(params, "issue_identifier")
     json(conn, Presenter.activity_payload(orchestrator(), limit, issue_identifier))
+  end
+
+  @spec config(Conn.t(), map()) :: Conn.t()
+  def config(conn, _params) do
+    json(conn, Presenter.config_payload())
+  end
+
+  @spec openapi(Conn.t(), map()) :: Conn.t()
+  def openapi(conn, _params) do
+    case File.read(@openapi_spec_path) do
+      {:ok, body} ->
+        conn
+        |> put_resp_content_type("application/yaml")
+        |> send_resp(200, body)
+
+      {:error, _reason} ->
+        error_response(conn, 503, "openapi_unavailable", "OpenAPI specification is unavailable")
+    end
   end
 
   @spec activity_stream(Conn.t(), map()) :: Conn.t()
@@ -122,7 +147,9 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
         end
     after
       15_000 ->
-        case Conn.chunk(conn, ": keep-alive\n\n") do
+        keepalive_payload = %{at: DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()}
+
+        case Conn.chunk(conn, "event: keepalive\ndata: #{Jason.encode!(keepalive_payload)}\n\n") do
           {:ok, conn} -> stream_activity(conn, issue_identifier)
           {:error, _reason} -> conn
         end

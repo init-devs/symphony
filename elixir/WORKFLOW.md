@@ -31,7 +31,7 @@ hooks:
   before_remove: |
     cd elixir && mise exec -- mix workspace.before_remove
 agent:
-  max_concurrent_agents: 10
+  max_concurrent_agents: 2
   max_turns: 20
 runtime:
   provider: opencode

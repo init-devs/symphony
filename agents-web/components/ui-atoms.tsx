@@ -1,54 +1,76 @@
 "use client"
 
 import { cn } from "@/lib/utils"
-import type { RunAttemptPhase, AgentEvent, OrchestratorClaim } from "@/lib/mock-data"
+
+type RunAttemptPhase = string
+type AgentEvent = string
+type OrchestratorClaim = string
 
 // ---- Status badge helpers ----
 
-export function PhaseBadge({ phase }: { phase: RunAttemptPhase }) {
-  const cfg: Record<RunAttemptPhase, { label: string; cls: string }> = {
-    PreparingWorkspace:     { label: "Preparing", cls: "bg-muted text-muted-foreground" },
-    BuildingPrompt:         { label: "Building Prompt", cls: "bg-muted text-muted-foreground" },
-    LaunchingAgentProcess:  { label: "Launching", cls: "bg-primary/15 text-primary" },
-    InitializingSession:    { label: "Initializing", cls: "bg-primary/15 text-primary" },
-    StreamingTurn:          { label: "Streaming", cls: "bg-running/15 text-running" },
-    Finishing:              { label: "Finishing", cls: "bg-running/15 text-running" },
-    Succeeded:              { label: "Succeeded", cls: "bg-running/15 text-running" },
-    Failed:                 { label: "Failed", cls: "bg-error/15 text-error-foreground" },
-    TimedOut:               { label: "Timed Out", cls: "bg-warning/15 text-warning" },
-    Stalled:                { label: "Stalled", cls: "bg-warning/15 text-warning" },
-    CanceledByReconciliation: { label: "Canceled", cls: "bg-muted text-muted-foreground" },
+export function PhaseBadge({ phase }: { phase: RunAttemptPhase | null | undefined }) {
+  if (!phase) {
+    return <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-muted text-muted-foreground">Unknown</span>
   }
-  const { label, cls } = cfg[phase]
+
+  const cfg =
+    {
+      PreparingWorkspace: { label: "Preparing", cls: "bg-muted text-muted-foreground" },
+      BuildingPrompt: { label: "Building Prompt", cls: "bg-muted text-muted-foreground" },
+      LaunchingAgentProcess: { label: "Launching", cls: "bg-primary/15 text-primary" },
+      InitializingSession: { label: "Initializing", cls: "bg-primary/15 text-primary" },
+      StreamingTurn: { label: "Streaming", cls: "bg-running/15 text-running" },
+      Finishing: { label: "Finishing", cls: "bg-running/15 text-running" },
+      Succeeded: { label: "Succeeded", cls: "bg-running/15 text-running" },
+      Failed: { label: "Failed", cls: "bg-error/15 text-error-foreground" },
+      TimedOut: { label: "Timed Out", cls: "bg-warning/15 text-warning" },
+      Stalled: { label: "Stalled", cls: "bg-warning/15 text-warning" },
+      CanceledByReconciliation: { label: "Canceled", cls: "bg-muted text-muted-foreground" },
+    } as const
+
+  const fallback = { label: phase || "Unknown", cls: "bg-muted text-muted-foreground" }
+  const selected = cfg[phase as keyof typeof cfg] ?? fallback
+
   return (
-    <span className={cn("inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full", cls)}>
+    <span className={cn("inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full", selected.cls)}>
       {(phase === "StreamingTurn" || phase === "Finishing") && (
         <span className="w-1.5 h-1.5 rounded-full bg-running pulse-dot" />
       )}
-      {label}
+      {selected.label}
     </span>
   )
 }
 
-export function ClaimBadge({ status }: { status: OrchestratorClaim }) {
-  const cfg: Record<OrchestratorClaim, { label: string; cls: string }> = {
-    Unclaimed:    { label: "Unclaimed", cls: "bg-muted text-muted-foreground" },
-    Claimed:      { label: "Claimed", cls: "bg-primary/15 text-primary" },
-    Running:      { label: "Running", cls: "bg-running/15 text-running" },
-    RetryQueued:  { label: "Retry Queued", cls: "bg-warning/15 text-warning" },
-    Released:     { label: "Released", cls: "bg-muted text-muted-foreground" },
+export function ClaimBadge({ status }: { status: OrchestratorClaim | null | undefined }) {
+  if (!status) {
+    return <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-muted text-muted-foreground">Unknown</span>
   }
-  const { label, cls } = cfg[status]
+
+  const cfg = {
+    Unclaimed: { label: "Unclaimed", cls: "bg-muted text-muted-foreground" },
+    Claimed: { label: "Claimed", cls: "bg-primary/15 text-primary" },
+    Running: { label: "Running", cls: "bg-running/15 text-running" },
+    RetryQueued: { label: "Retry Queued", cls: "bg-warning/15 text-warning" },
+    Released: { label: "Released", cls: "bg-muted text-muted-foreground" },
+  } as const
+
+  const fallback = { label: status || "Unknown", cls: "bg-muted text-muted-foreground" }
+  const selected = cfg[status as keyof typeof cfg] ?? fallback
+
   return (
-    <span className={cn("inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full", cls)}>
+    <span className={cn("inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full", selected.cls)}>
       {status === "Running" && <span className="w-1.5 h-1.5 rounded-full bg-running pulse-dot" />}
       {status === "RetryQueued" && <span className="w-1.5 h-1.5 rounded-full bg-warning" />}
-      {label}
+      {selected.label}
     </span>
   )
 }
 
-export function EventBadge({ event }: { event: AgentEvent }) {
+export function EventBadge({ event }: { event: AgentEvent | null | undefined }) {
+  if (!event) {
+    return <span className="font-mono text-[11px] text-muted-foreground">unknown</span>
+  }
+
   const cfg: Partial<Record<AgentEvent, { label: string; cls: string }>> = {
     session_started:        { label: "session_started", cls: "text-primary" },
     turn_completed:         { label: "turn_completed", cls: "text-running" },
@@ -67,8 +89,10 @@ export function EventBadge({ event }: { event: AgentEvent }) {
 }
 
 // ---- Priority indicator ----
-export function PriorityDot({ priority }: { priority: number | null }) {
-  if (priority === null) return <span className="w-2 h-2 rounded-full bg-muted-foreground/30" />
+export function PriorityDot({ priority }: { priority: number | null | undefined }) {
+  if (typeof priority !== "number") {
+    return <span className="w-2 h-2 rounded-full bg-muted-foreground/30" />
+  }
   const colors = ["", "bg-error", "bg-warning", "bg-primary/60", "bg-muted-foreground/50"]
   return <span className={cn("w-2 h-2 rounded-full flex-shrink-0", colors[priority] ?? "bg-muted-foreground/30")} />
 }
@@ -89,7 +113,9 @@ export function TokenCount({ value, label }: { value: number; label?: string }) 
 }
 
 // ---- Relative time ----
-export function RelativeTime({ iso }: { iso: string }) {
+export function RelativeTime({ iso }: { iso: string | null | undefined }) {
+  if (!iso) return <span className="font-mono text-xs text-muted-foreground">n/a</span>
+
   const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
   let label: string
   if (diff < 60) label = `${diff}s ago`
@@ -99,7 +125,9 @@ export function RelativeTime({ iso }: { iso: string }) {
 }
 
 // ---- Countdown ----
-export function Countdown({ iso }: { iso: string }) {
+export function Countdown({ iso }: { iso: string | null | undefined }) {
+  if (!iso) return <span className="font-mono text-xs text-warning">n/a</span>
+
   const diff = Math.ceil((new Date(iso).getTime() - Date.now()) / 1000)
   if (diff <= 0) return <span className="font-mono text-xs text-warning">now</span>
   const mins = Math.floor(diff / 60)
@@ -109,7 +137,11 @@ export function Countdown({ iso }: { iso: string }) {
 }
 
 // ---- Session ID truncation ----
-export function SessionId({ id }: { id: string }) {
+export function SessionId({ id }: { id: string | null | undefined }) {
+  if (!id) {
+    return <span className="font-mono text-xs text-muted-foreground">n/a</span>
+  }
+
   const parts = id.split("-")
   const short = parts.length >= 2 ? `${parts[0].slice(0, 8)}…${parts[parts.length - 1]}` : id.slice(0, 16)
   return (

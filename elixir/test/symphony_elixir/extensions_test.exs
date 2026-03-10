@@ -2,7 +2,6 @@ defmodule SymphonyElixir.ExtensionsTest do
   use SymphonyElixir.TestSupport
 
   import Phoenix.ConnTest
-  import Phoenix.LiveViewTest
 
   alias SymphonyElixir.Linear.Adapter
   alias SymphonyElixir.Tracker.Memory
@@ -74,6 +73,11 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     def handle_call(:request_refresh, _from, state) do
       {:reply, Keyword.get(state, :refresh, :unavailable), state}
+    end
+
+    def handle_call({:recent_activity, limit}, _from, state) when is_integer(limit) and limit > 0 do
+      activity = state |> Keyword.get(:activity, []) |> Enum.take(limit)
+      {:reply, activity, state}
     end
   end
 
@@ -340,71 +344,67 @@ defmodule SymphonyElixir.ExtensionsTest do
     conn = get(build_conn(), "/api/v1/state")
     state_payload = json_response(conn, 200)
 
-    assert state_payload == %{
-             "generated_at" => state_payload["generated_at"],
-             "counts" => %{"running" => 1, "retrying" => 1},
-             "running" => [
-               %{
-                 "issue_id" => "issue-http",
-                 "issue_identifier" => "MT-HTTP",
-                 "state" => "In Progress",
-                 "session_id" => "thread-http",
-                 "turn_count" => 7,
-                 "last_event" => "notification",
-                 "last_message" => "rendered",
-                 "started_at" => state_payload["running"] |> List.first() |> Map.fetch!("started_at"),
-                 "last_event_at" => nil,
-                 "tokens" => %{"input_tokens" => 4, "output_tokens" => 8, "total_tokens" => 12}
-               }
-             ],
-             "retrying" => [
-               %{
-                 "issue_id" => "issue-retry",
-                 "issue_identifier" => "MT-RETRY",
-                 "attempt" => 2,
-                 "due_at" => state_payload["retrying"] |> List.first() |> Map.fetch!("due_at"),
-                 "error" => "boom"
-               }
-             ],
-             "codex_totals" => %{
-               "input_tokens" => 4,
-               "output_tokens" => 8,
-               "total_tokens" => 12,
-               "seconds_running" => 42.5
-             },
-             "rate_limits" => %{"primary" => %{"remaining" => 11}}
+    assert state_payload["counts"] == %{"running" => 1, "retrying" => 1}
+    assert state_payload["max_concurrent_agents"] == 10
+    assert is_integer(state_payload["service_uptime_seconds"])
+    assert state_payload["codex_totals"] == %{
+             "input_tokens" => 4,
+             "output_tokens" => 8,
+             "total_tokens" => 12,
+             "seconds_running" => 42.5
            }
+    assert state_payload["rate_limits"] == %{"primary" => %{"remaining" => 11}}
+    assert state_payload["polling"]["poll_interval_ms"] == 30_000
+
+    assert [running_entry] = state_payload["running"]
+    assert running_entry["issue_identifier"] == "MT-HTTP"
+    assert running_entry["session_id"] == "thread-http"
+    assert running_entry["turn_count"] == 7
+    assert running_entry["last_event"] == "notification"
+    assert running_entry["last_message"] == "rendered"
+    assert running_entry["tokens"] == %{"input_tokens" => 4, "output_tokens" => 8, "total_tokens" => 12}
+    assert running_entry["phase"] == "StreamingTurn"
+
+    assert [retry_entry] = state_payload["retrying"]
+    assert retry_entry["issue_identifier"] == "MT-RETRY"
+    assert retry_entry["attempt"] == 2
+    assert retry_entry["error"] == "boom"
+    assert is_binary(retry_entry["due_at"])
 
     conn = get(build_conn(), "/api/v1/MT-HTTP")
     issue_payload = json_response(conn, 200)
 
-    assert issue_payload == %{
-             "issue_identifier" => "MT-HTTP",
-             "issue_id" => "issue-http",
-             "status" => "running",
-             "workspace" => %{"path" => Path.join(Config.workspace_root(), "MT-HTTP")},
-             "attempts" => %{"restart_count" => 0, "current_retry_attempt" => 0},
-             "running" => %{
-               "session_id" => "thread-http",
-               "turn_count" => 7,
-               "state" => "In Progress",
-               "started_at" => issue_payload["running"]["started_at"],
-               "last_event" => "notification",
-               "last_message" => "rendered",
-               "last_event_at" => nil,
-               "tokens" => %{"input_tokens" => 4, "output_tokens" => 8, "total_tokens" => 12}
-             },
-             "retry" => nil,
-             "logs" => %{"codex_session_logs" => []},
-             "recent_events" => [],
-             "last_error" => nil,
-             "tracked" => %{}
-           }
+    assert issue_payload["issue_identifier"] == "MT-HTTP"
+    assert issue_payload["issue_id"] == "issue-http"
+    assert issue_payload["status"] == "running"
+    assert issue_payload["workspace"]["path"] == Path.join(Config.workspace_root(), "MT-HTTP")
+    assert issue_payload["attempts"] == %{"restart_count" => 0, "current_retry_attempt" => 0}
+    assert issue_payload["running"]["session_id"] == "thread-http"
+    assert issue_payload["running"]["phase"] == "StreamingTurn"
+    assert issue_payload["running"]["tokens"] == %{"input_tokens" => 4, "output_tokens" => 8, "total_tokens" => 12}
+    assert issue_payload["retry"] == nil
+    assert issue_payload["logs"] == %{"codex_session_logs" => []}
+    assert issue_payload["recent_events"] == []
+    assert [%{"at" => _, "total_tokens" => 12}] = issue_payload["token_history"]
+    assert issue_payload["last_error"] == nil
+    assert issue_payload["tracked"] == %{}
 
     conn = get(build_conn(), "/api/v1/MT-RETRY")
 
     assert %{"status" => "retrying", "retry" => %{"attempt" => 2, "error" => "boom"}} =
              json_response(conn, 200)
+
+    issues_payload = json_response(get(build_conn(), "/api/v1/issues"), 200)
+    assert issues_payload["counts"] == %{"running" => 1, "retrying" => 1, "total" => 2}
+    assert Enum.any?(issues_payload["issues"], &(&1["issue_identifier"] == "MT-HTTP"))
+    assert Enum.any?(issues_payload["issues"], &(&1["issue_identifier"] == "MT-RETRY"))
+
+    config_payload = json_response(get(build_conn(), "/api/v1/config"), 200)
+    assert is_map(config_payload["effective_config"])
+    assert is_map(config_payload["validation"])
+
+    openapi_payload = response(get(build_conn(), "/api/v1/openapi.yaml"), 200)
+    assert openapi_payload =~ "openapi: 3.1.0"
 
     conn = get(build_conn(), "/api/v1/MT-MISSING")
 
@@ -428,8 +428,8 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert json_response(get(build_conn(), "/api/v1/refresh"), 405) ==
              %{"error" => %{"code" => "method_not_allowed", "message" => "Method not allowed"}}
 
-    assert json_response(post(build_conn(), "/", %{}), 405) ==
-             %{"error" => %{"code" => "method_not_allowed", "message" => "Method not allowed"}}
+    assert json_response(post(build_conn(), "/", %{}), 404) ==
+             %{"error" => %{"code" => "not_found", "message" => "Route not found"}}
 
     assert json_response(post(build_conn(), "/api/v1/MT-1", %{}), 405) ==
              %{"error" => %{"code" => "method_not_allowed", "message" => "Method not allowed"}}
@@ -468,137 +468,7 @@ defmodule SymphonyElixir.ExtensionsTest do
              }
   end
 
-  test "dashboard bootstraps liveview from embedded static assets" do
-    orchestrator_name = Module.concat(__MODULE__, :AssetOrchestrator)
-
-    {:ok, _pid} =
-      StaticOrchestrator.start_link(
-        name: orchestrator_name,
-        snapshot: static_snapshot(),
-        refresh: %{
-          queued: true,
-          coalesced: false,
-          requested_at: DateTime.utc_now(),
-          operations: ["poll"]
-        }
-      )
-
-    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
-
-    html = html_response(get(build_conn(), "/"), 200)
-    assert html =~ "/dashboard.css"
-    assert html =~ "/vendor/phoenix_html/phoenix_html.js"
-    assert html =~ "/vendor/phoenix/phoenix.js"
-    assert html =~ "/vendor/phoenix_live_view/phoenix_live_view.js"
-    refute html =~ "/assets/app.js"
-    refute html =~ "<style>"
-
-    dashboard_css = response(get(build_conn(), "/dashboard.css"), 200)
-    assert dashboard_css =~ ":root {"
-    assert dashboard_css =~ ".status-badge-live"
-    assert dashboard_css =~ "[data-phx-main].phx-connected .status-badge-live"
-    assert dashboard_css =~ "[data-phx-main].phx-connected .status-badge-offline"
-
-    phoenix_html_js = response(get(build_conn(), "/vendor/phoenix_html/phoenix_html.js"), 200)
-    assert phoenix_html_js =~ "phoenix.link.click"
-
-    phoenix_js = response(get(build_conn(), "/vendor/phoenix/phoenix.js"), 200)
-    assert phoenix_js =~ "var Phoenix = (() => {"
-
-    live_view_js =
-      response(get(build_conn(), "/vendor/phoenix_live_view/phoenix_live_view.js"), 200)
-
-    assert live_view_js =~ "var LiveView = (() => {"
-  end
-
-  test "dashboard liveview renders and refreshes over pubsub" do
-    orchestrator_name = Module.concat(__MODULE__, :DashboardOrchestrator)
-    snapshot = static_snapshot()
-
-    {:ok, orchestrator_pid} =
-      StaticOrchestrator.start_link(
-        name: orchestrator_name,
-        snapshot: snapshot,
-        refresh: %{
-          queued: true,
-          coalesced: true,
-          requested_at: DateTime.utc_now(),
-          operations: ["poll"]
-        }
-      )
-
-    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
-
-    {:ok, view, html} = live(build_conn(), "/")
-    assert html =~ "Operations Dashboard"
-    assert html =~ "MT-HTTP"
-    assert html =~ "MT-RETRY"
-    assert html =~ "rendered"
-    assert html =~ "Runtime"
-    assert html =~ "Live"
-    assert html =~ "Offline"
-    assert html =~ "Copy ID"
-    assert html =~ "Codex update"
-    refute html =~ "data-runtime-clock="
-    refute html =~ "setInterval(refreshRuntimeClocks"
-    refute html =~ "Refresh now"
-    refute html =~ "Transport"
-    assert html =~ "status-badge-live"
-    assert html =~ "status-badge-offline"
-
-    updated_snapshot =
-      put_in(snapshot.running, [
-        %{
-          issue_id: "issue-http",
-          identifier: "MT-HTTP",
-          state: "In Progress",
-          session_id: "thread-http",
-          turn_count: 8,
-          last_codex_event: :notification,
-          last_codex_message: %{
-            event: :notification,
-            message: %{
-              payload: %{
-                "method" => "codex/event/agent_message_content_delta",
-                "params" => %{
-                  "msg" => %{
-                    "content" => "structured update"
-                  }
-                }
-              }
-            }
-          },
-          last_codex_timestamp: DateTime.utc_now(),
-          codex_input_tokens: 10,
-          codex_output_tokens: 12,
-          codex_total_tokens: 22,
-          started_at: DateTime.utc_now()
-        }
-      ])
-
-    :sys.replace_state(orchestrator_pid, fn state ->
-      Keyword.put(state, :snapshot, updated_snapshot)
-    end)
-
-    StatusDashboard.notify_update()
-
-    assert_eventually(fn ->
-      render(view) =~ "agent message content streaming: structured update"
-    end)
-  end
-
-  test "dashboard liveview renders an unavailable state without crashing" do
-    start_test_endpoint(
-      orchestrator: Module.concat(__MODULE__, :MissingDashboardOrchestrator),
-      snapshot_timeout_ms: 5
-    )
-
-    {:ok, _view, html} = live(build_conn(), "/")
-    assert html =~ "Snapshot unavailable"
-    assert html =~ "snapshot_unavailable"
-  end
-
-  test "http server serves embedded assets, accepts form posts, and rejects invalid hosts" do
+  test "http server serves observability api and rejects invalid hosts" do
     spec = HttpServer.child_spec(port: 0)
     assert spec.id == HttpServer
     assert spec.start == {HttpServer, :start_link, [[port: 0]]}
@@ -634,13 +504,13 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert response.status == 200
     assert response.body["counts"] == %{"running" => 1, "retrying" => 1}
 
-    dashboard_css = Req.get!("http://127.0.0.1:#{port}/dashboard.css")
-    assert dashboard_css.status == 200
-    assert dashboard_css.body =~ ":root {"
+    openapi_response = Req.get!("http://127.0.0.1:#{port}/api/v1/openapi.yaml")
+    assert openapi_response.status == 200
+    assert openapi_response.body =~ "openapi: 3.1.0"
 
-    phoenix_js = Req.get!("http://127.0.0.1:#{port}/vendor/phoenix/phoenix.js")
-    assert phoenix_js.status == 200
-    assert phoenix_js.body =~ "var Phoenix = (() => {"
+    config_response = Req.get!("http://127.0.0.1:#{port}/api/v1/config")
+    assert config_response.status == 200
+    assert is_map(config_response.body["effective_config"])
 
     refresh_response =
       Req.post!("http://127.0.0.1:#{port}/api/v1/refresh",
