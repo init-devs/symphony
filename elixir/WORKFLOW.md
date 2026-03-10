@@ -33,12 +33,12 @@ hooks:
 agent:
   max_concurrent_agents: 10
   max_turns: 20
-codex:
-  command: codex --config shell_environment_policy.inherit=all --config model_reasoning_effort=xhigh --model gpt-5.3-codex app-server
-  approval_policy: never
-  thread_sandbox: workspace-write
-  turn_sandbox_policy:
-    type: workspaceWrite
+runtime:
+  provider: opencode
+  command: opencode serve --hostname 127.0.0.1 --port 0
+  model: openai/gpt-5.3-codex
+  agent: build
+  variant: xhigh
 ---
 
 You are working on a Linear ticket `{{ issue.identifier }}`

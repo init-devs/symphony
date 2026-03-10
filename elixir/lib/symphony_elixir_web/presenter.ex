@@ -60,6 +60,28 @@ defmodule SymphonyElixirWeb.Presenter do
     end
   end
 
+  @spec activity_payload(GenServer.name(), pos_integer(), String.t() | nil) :: map()
+  def activity_payload(orchestrator, limit, issue_identifier \\ nil)
+      when is_integer(limit) and limit > 0 do
+    generated_at = DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
+
+    case Orchestrator.recent_activity(orchestrator, limit) do
+      :unavailable ->
+        %{generated_at: generated_at, error: %{code: "snapshot_unavailable", message: "Snapshot unavailable"}}
+
+      activity_events when is_list(activity_events) ->
+        events =
+          activity_events
+          |> maybe_filter_activity_events(issue_identifier)
+          |> Enum.map(&activity_event_payload/1)
+
+        %{generated_at: generated_at, events: events}
+    end
+  end
+
+  @spec activity_payload_event(map()) :: map()
+  def activity_payload_event(event) when is_map(event), do: activity_event_payload(event)
+
   defp issue_payload_body(issue_identifier, running, retry) do
     %{
       issue_identifier: issue_identifier,
@@ -157,6 +179,24 @@ defmodule SymphonyElixirWeb.Presenter do
       }
     ]
     |> Enum.reject(&is_nil(&1.at))
+  end
+
+  defp maybe_filter_activity_events(events, issue_identifier) when is_binary(issue_identifier) do
+    Enum.filter(events, fn event -> event[:issue_identifier] == issue_identifier end)
+  end
+
+  defp maybe_filter_activity_events(events, _issue_identifier), do: events
+
+  defp activity_event_payload(event) when is_map(event) do
+    %{
+      issue_id: event[:issue_id],
+      issue_identifier: event[:issue_identifier],
+      session_id: event[:session_id],
+      event: event[:event],
+      at: iso8601(event[:at]),
+      message: summarize_message(event[:message]),
+      tokens: event[:tokens]
+    }
   end
 
   defp summarize_message(nil), do: nil

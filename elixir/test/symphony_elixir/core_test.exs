@@ -80,11 +80,8 @@ defmodule SymphonyElixir.CoreTest do
 
     assert :ok = Config.validate!()
 
-    write_workflow_file!(Workflow.workflow_file_path(), codex_approval_policy: 123)
-    assert {:error, {:invalid_codex_approval_policy, 123}} = Config.validate!()
-
-    write_workflow_file!(Workflow.workflow_file_path(), codex_thread_sandbox: 123)
-    assert {:error, {:invalid_codex_thread_sandbox, 123}} = Config.validate!()
+    write_workflow_file!(Workflow.workflow_file_path(), runtime_provider: "definitely-not-valid")
+    assert {:error, {:unsupported_runtime_provider, "definitely-not-valid"}} = Config.validate!()
 
     write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: 123)
     assert {:error, {:unsupported_tracker_kind, "123"}} = Config.validate!()
@@ -914,7 +911,7 @@ defmodule SymphonyElixir.CoreTest do
       }
 
       before = MapSet.new(File.ls!(workspace_root))
-      assert :ok = AgentRunner.run(issue)
+      assert :ok = AgentRunner.run(issue, nil, runtime_adapter: AppServer)
       entries_after = MapSet.new(File.ls!(workspace_root))
 
       created =
@@ -1005,10 +1002,11 @@ defmodule SymphonyElixir.CoreTest do
                AgentRunner.run(
                  issue,
                  test_pid,
-                 issue_state_fetcher: fn [_issue_id] -> {:ok, [%{issue | state: "Done"}]} end
+                 issue_state_fetcher: fn [_issue_id] -> {:ok, [%{issue | state: "Done"}]} end,
+                 runtime_adapter: AppServer
                )
 
-      assert_receive {:codex_worker_update, "issue-live-updates",
+      assert_receive {:runtime_worker_update, "issue-live-updates",
                       %{
                         event: :session_started,
                         timestamp: %DateTime{},
@@ -1122,7 +1120,12 @@ defmodule SymphonyElixir.CoreTest do
         labels: []
       }
 
-      assert :ok = AgentRunner.run(issue, nil, issue_state_fetcher: state_fetcher)
+      assert :ok =
+               AgentRunner.run(issue, nil,
+                 issue_state_fetcher: state_fetcher,
+                 runtime_adapter: AppServer
+               )
+
       assert_receive {:issue_state_fetch, 1}
       assert_receive {:issue_state_fetch, 2}
 
@@ -1239,7 +1242,11 @@ defmodule SymphonyElixir.CoreTest do
         labels: []
       }
 
-      assert :ok = AgentRunner.run(issue, nil, issue_state_fetcher: state_fetcher)
+      assert :ok =
+               AgentRunner.run(issue, nil,
+                 issue_state_fetcher: state_fetcher,
+                 runtime_adapter: AppServer
+               )
 
       trace = File.read!(trace_file)
       assert length(String.split(trace, "RUN", trim: true)) == 1

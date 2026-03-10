@@ -28,10 +28,11 @@ defmodule SymphonyElixir.Config do
   @default_max_concurrent_agents 10
   @default_agent_max_turns 20
   @default_max_retry_backoff_ms 300_000
-  @default_codex_command "codex app-server"
-  @default_codex_turn_timeout_ms 3_600_000
-  @default_codex_read_timeout_ms 5_000
-  @default_codex_stall_timeout_ms 300_000
+  @default_runtime_provider "opencode"
+  @default_runtime_command "opencode serve --hostname 127.0.0.1 --port 0"
+  @default_runtime_turn_timeout_ms 3_600_000
+  @default_runtime_read_timeout_ms 5_000
+  @default_runtime_stall_timeout_ms 300_000
   @default_codex_approval_policy %{
     "reject" => %{
       "sandbox_approval" => true,
@@ -101,23 +102,27 @@ defmodule SymphonyElixir.Config do
                                  ]
                                ]
                              ],
-                             codex: [
+                             runtime: [
                                type: :map,
                                default: %{},
                                keys: [
-                                 command: [type: :string, default: @default_codex_command],
+                                 provider: [type: :string, default: @default_runtime_provider],
+                                 command: [type: :string, default: @default_runtime_command],
                                  turn_timeout_ms: [
                                    type: :integer,
-                                   default: @default_codex_turn_timeout_ms
+                                   default: @default_runtime_turn_timeout_ms
                                  ],
                                  read_timeout_ms: [
                                    type: :integer,
-                                   default: @default_codex_read_timeout_ms
+                                   default: @default_runtime_read_timeout_ms
                                  ],
                                  stall_timeout_ms: [
                                    type: :integer,
-                                   default: @default_codex_stall_timeout_ms
-                                 ]
+                                   default: @default_runtime_stall_timeout_ms
+                                 ],
+                                 model: [type: {:or, [:string, nil]}, default: nil],
+                                 agent: [type: {:or, [:string, nil]}, default: nil],
+                                 variant: [type: {:or, [:string, nil]}, default: nil]
                                ]
                              ],
                              hooks: [
@@ -161,6 +166,16 @@ defmodule SymphonyElixir.Config do
 
   @type workflow_payload :: Workflow.loaded_workflow()
   @type tracker_kind :: String.t() | nil
+  @type runtime_settings :: %{
+          provider: String.t(),
+          command: String.t(),
+          turn_timeout_ms: pos_integer(),
+          read_timeout_ms: pos_integer(),
+          stall_timeout_ms: non_neg_integer(),
+          model: String.t() | nil,
+          agent: String.t() | nil,
+          variant: String.t() | nil
+        }
   @type codex_runtime_settings :: %{
           approval_policy: String.t() | map(),
           thread_sandbox: String.t(),
@@ -300,15 +315,77 @@ defmodule SymphonyElixir.Config do
 
   def max_concurrent_agents_for_state(_state_name), do: max_concurrent_agents()
 
-  @spec codex_command() :: String.t()
-  def codex_command do
-    get_in(validated_workflow_options(), [:codex, :command])
+  @spec runtime_provider() :: String.t()
+  def runtime_provider do
+    validated_workflow_options()
+    |> get_in([:runtime, :provider])
+    |> to_string()
+    |> String.trim()
+    |> String.downcase()
   end
 
-  @spec codex_turn_timeout_ms() :: pos_integer()
-  def codex_turn_timeout_ms do
-    get_in(validated_workflow_options(), [:codex, :turn_timeout_ms])
+  @spec runtime_command() :: String.t()
+  def runtime_command do
+    get_in(validated_workflow_options(), [:runtime, :command])
   end
+
+  @spec runtime_turn_timeout_ms() :: pos_integer()
+  def runtime_turn_timeout_ms do
+    get_in(validated_workflow_options(), [:runtime, :turn_timeout_ms])
+  end
+
+  @spec runtime_read_timeout_ms() :: pos_integer()
+  def runtime_read_timeout_ms do
+    get_in(validated_workflow_options(), [:runtime, :read_timeout_ms])
+  end
+
+  @spec runtime_stall_timeout_ms() :: non_neg_integer()
+  def runtime_stall_timeout_ms do
+    validated_workflow_options()
+    |> get_in([:runtime, :stall_timeout_ms])
+    |> max(0)
+  end
+
+  @spec runtime_model() :: String.t() | nil
+  def runtime_model do
+    validated_workflow_options()
+    |> get_in([:runtime, :model])
+    |> normalize_secret_value()
+  end
+
+  @spec runtime_agent() :: String.t() | nil
+  def runtime_agent do
+    validated_workflow_options()
+    |> get_in([:runtime, :agent])
+    |> normalize_secret_value()
+  end
+
+  @spec runtime_variant() :: String.t() | nil
+  def runtime_variant do
+    validated_workflow_options()
+    |> get_in([:runtime, :variant])
+    |> normalize_secret_value()
+  end
+
+  @spec runtime_settings() :: runtime_settings()
+  def runtime_settings do
+    %{
+      provider: runtime_provider(),
+      command: runtime_command(),
+      turn_timeout_ms: runtime_turn_timeout_ms(),
+      read_timeout_ms: runtime_read_timeout_ms(),
+      stall_timeout_ms: runtime_stall_timeout_ms(),
+      model: runtime_model(),
+      agent: runtime_agent(),
+      variant: runtime_variant()
+    }
+  end
+
+  @spec codex_command() :: String.t()
+  def codex_command, do: runtime_command()
+
+  @spec codex_turn_timeout_ms() :: pos_integer()
+  def codex_turn_timeout_ms, do: runtime_turn_timeout_ms()
 
   @spec codex_approval_policy() :: String.t() | map()
   def codex_approval_policy do
@@ -335,16 +412,10 @@ defmodule SymphonyElixir.Config do
   end
 
   @spec codex_read_timeout_ms() :: pos_integer()
-  def codex_read_timeout_ms do
-    get_in(validated_workflow_options(), [:codex, :read_timeout_ms])
-  end
+  def codex_read_timeout_ms, do: runtime_read_timeout_ms()
 
   @spec codex_stall_timeout_ms() :: non_neg_integer()
-  def codex_stall_timeout_ms do
-    validated_workflow_options()
-    |> get_in([:codex, :stall_timeout_ms])
-    |> max(0)
-  end
+  def codex_stall_timeout_ms, do: runtime_stall_timeout_ms()
 
   @spec workflow_prompt() :: String.t()
   def workflow_prompt do
@@ -394,8 +465,8 @@ defmodule SymphonyElixir.Config do
          :ok <- require_tracker_kind(),
          :ok <- require_linear_token(),
          :ok <- require_linear_scope(),
-         :ok <- require_valid_codex_runtime_settings() do
-      require_codex_command()
+         :ok <- require_runtime_provider() do
+      require_runtime_command()
     end
   end
 
@@ -450,18 +521,18 @@ defmodule SymphonyElixir.Config do
     end
   end
 
-  defp require_codex_command do
-    if byte_size(String.trim(codex_command())) > 0 do
-      :ok
-    else
-      {:error, :missing_codex_command}
+  defp require_runtime_provider do
+    case runtime_provider() do
+      "opencode" -> :ok
+      provider when is_binary(provider) -> {:error, {:unsupported_runtime_provider, provider}}
     end
   end
 
-  defp require_valid_codex_runtime_settings do
-    case codex_runtime_settings() do
-      {:ok, _settings} -> :ok
-      {:error, reason} -> {:error, reason}
+  defp require_runtime_command do
+    if byte_size(String.trim(runtime_command())) > 0 do
+      :ok
+    else
+      {:error, :missing_runtime_command}
     end
   end
 
@@ -477,7 +548,7 @@ defmodule SymphonyElixir.Config do
       polling: extract_polling_options(section_map(config, "polling")),
       workspace: extract_workspace_options(section_map(config, "workspace")),
       agent: extract_agent_options(section_map(config, "agent")),
-      codex: extract_codex_options(section_map(config, "codex")),
+      runtime: extract_runtime_options(section_map(config, "runtime")),
       hooks: extract_hooks_options(section_map(config, "hooks")),
       observability: extract_observability_options(section_map(config, "observability")),
       server: extract_server_options(section_map(config, "server"))
@@ -517,12 +588,16 @@ defmodule SymphonyElixir.Config do
     )
   end
 
-  defp extract_codex_options(section) do
+  defp extract_runtime_options(section) do
     %{}
+    |> put_if_present(:provider, scalar_string_value(Map.get(section, "provider")))
     |> put_if_present(:command, command_value(Map.get(section, "command")))
     |> put_if_present(:turn_timeout_ms, integer_value(Map.get(section, "turn_timeout_ms")))
     |> put_if_present(:read_timeout_ms, integer_value(Map.get(section, "read_timeout_ms")))
     |> put_if_present(:stall_timeout_ms, integer_value(Map.get(section, "stall_timeout_ms")))
+    |> put_if_present(:model, scalar_string_value(Map.get(section, "model")))
+    |> put_if_present(:agent, scalar_string_value(Map.get(section, "agent")))
+    |> put_if_present(:variant, scalar_string_value(Map.get(section, "variant")))
   end
 
   defp extract_hooks_options(section) do

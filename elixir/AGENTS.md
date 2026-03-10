@@ -1,13 +1,12 @@
 # Symphony Elixir
 
-This directory contains the Elixir agent orchestration service that polls Linear, creates per-issue workspaces, and runs Codex in app-server mode.
+This directory contains the Elixir agent orchestration service that polls Linear, creates per-issue workspaces, and runs the configured runtime backend.
 
 ## Environment
 
 - Elixir: `1.19.x` (OTP 28) via `mise`.
 - Install deps: `mix setup`.
 - Main quality gate: `make all` (format check, lint, coverage, dialyzer).
-
 
 ## Codebase-Specific Conventions
 
@@ -19,7 +18,7 @@ This directory contains the Elixir agent orchestration service that polls Linear
     change where practical so the spec stays current.
 - Prefer adding config access through `SymphonyElixir.Config` instead of ad-hoc env reads.
 - Workspace safety is critical:
-  - Never run Codex turn cwd in source repo.
+  - Never run agent turn cwd in source repo.
   - Workspaces must stay under configured workspace root.
 - Orchestrator behavior is stateful and concurrency-sensitive; preserve retry, reconciliation, and cleanup semantics.
 - Follow `docs/logging.md` for logging conventions and required issue/session context fields.

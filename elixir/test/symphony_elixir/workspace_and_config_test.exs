@@ -693,7 +693,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert Config.linear_scope() == nil
     assert Config.workspace_root() == Path.join(System.tmp_dir!(), "symphony_workspaces")
     assert Config.max_concurrent_agents() == 10
-    assert Config.codex_command() == "codex app-server"
+    assert Config.codex_command() == "opencode serve --hostname 127.0.0.1 --port 0"
 
     assert Config.codex_approval_policy() == %{
              "reject" => %{
@@ -789,11 +789,11 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
              }
            }
 
-    assert {:error, {:invalid_codex_approval_policy, ""}} = Config.validate!()
+    assert :ok = Config.validate!()
 
     write_workflow_file!(Workflow.workflow_file_path(), codex_thread_sandbox: "")
     assert Config.codex_thread_sandbox() == "workspace-write"
-    assert {:error, {:invalid_codex_thread_sandbox, ""}} = Config.validate!()
+    assert :ok = Config.validate!()
 
     write_workflow_file!(Workflow.workflow_file_path(), codex_turn_sandbox_policy: "bad")
 
@@ -806,8 +806,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
              "excludeSlashTmp" => false
            }
 
-    assert {:error, {:invalid_codex_turn_sandbox_policy, {:unsupported_value, "bad"}}} =
-             Config.validate!()
+    assert :ok = Config.validate!()
 
     write_workflow_file!(Workflow.workflow_file_path(),
       codex_approval_policy: "future-policy",
@@ -828,8 +827,8 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
     assert :ok = Config.validate!()
 
-    write_workflow_file!(Workflow.workflow_file_path(), codex_command: "codex app-server")
-    assert Config.codex_command() == "codex app-server"
+    write_workflow_file!(Workflow.workflow_file_path(), runtime_command: "opencode serve --hostname 127.0.0.1 --port 0")
+    assert Config.runtime_command() == "opencode serve --hostname 127.0.0.1 --port 0"
   end
 
   test "config resolves $VAR references for env-backed secret and path values" do

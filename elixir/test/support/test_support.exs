@@ -106,13 +106,17 @@ defmodule SymphonyElixir.TestSupport do
           max_turns: 20,
           max_retry_backoff_ms: 300_000,
           max_concurrent_agents_by_state: %{},
-          codex_command: "codex app-server",
+          runtime_provider: "opencode",
+          runtime_command: "opencode serve --hostname 127.0.0.1 --port 0",
           codex_approval_policy: %{reject: %{sandbox_approval: true, rules: true, mcp_elicitations: true}},
           codex_thread_sandbox: "workspace-write",
           codex_turn_sandbox_policy: nil,
-          codex_turn_timeout_ms: 3_600_000,
-          codex_read_timeout_ms: 5_000,
-          codex_stall_timeout_ms: 300_000,
+          runtime_turn_timeout_ms: 3_600_000,
+          runtime_read_timeout_ms: 5_000,
+          runtime_stall_timeout_ms: 300_000,
+          runtime_model: nil,
+          runtime_agent: nil,
+          runtime_variant: nil,
           hook_after_create: nil,
           hook_before_run: nil,
           hook_after_run: nil,
@@ -142,13 +146,26 @@ defmodule SymphonyElixir.TestSupport do
     max_turns = Keyword.get(config, :max_turns)
     max_retry_backoff_ms = Keyword.get(config, :max_retry_backoff_ms)
     max_concurrent_agents_by_state = Keyword.get(config, :max_concurrent_agents_by_state)
-    codex_command = Keyword.get(config, :codex_command)
+    runtime_provider = Keyword.get(config, :runtime_provider)
+
+    runtime_command = pick_runtime_value(overrides, config, :runtime_command, :codex_command)
+
     codex_approval_policy = Keyword.get(config, :codex_approval_policy)
     codex_thread_sandbox = Keyword.get(config, :codex_thread_sandbox)
     codex_turn_sandbox_policy = Keyword.get(config, :codex_turn_sandbox_policy)
-    codex_turn_timeout_ms = Keyword.get(config, :codex_turn_timeout_ms)
-    codex_read_timeout_ms = Keyword.get(config, :codex_read_timeout_ms)
-    codex_stall_timeout_ms = Keyword.get(config, :codex_stall_timeout_ms)
+
+    runtime_turn_timeout_ms =
+      pick_runtime_value(overrides, config, :runtime_turn_timeout_ms, :codex_turn_timeout_ms)
+
+    runtime_read_timeout_ms =
+      pick_runtime_value(overrides, config, :runtime_read_timeout_ms, :codex_read_timeout_ms)
+
+    runtime_stall_timeout_ms =
+      pick_runtime_value(overrides, config, :runtime_stall_timeout_ms, :codex_stall_timeout_ms)
+
+    runtime_model = Keyword.get(config, :runtime_model)
+    runtime_agent = Keyword.get(config, :runtime_agent)
+    runtime_variant = Keyword.get(config, :runtime_variant)
     hook_after_create = Keyword.get(config, :hook_after_create)
     hook_before_run = Keyword.get(config, :hook_before_run)
     hook_after_run = Keyword.get(config, :hook_after_run)
@@ -182,14 +199,19 @@ defmodule SymphonyElixir.TestSupport do
         "  max_turns: #{yaml_value(max_turns)}",
         "  max_retry_backoff_ms: #{yaml_value(max_retry_backoff_ms)}",
         "  max_concurrent_agents_by_state: #{yaml_value(max_concurrent_agents_by_state)}",
+        "runtime:",
+        "  provider: #{yaml_value(runtime_provider)}",
+        "  command: #{yaml_value(runtime_command)}",
+        "  turn_timeout_ms: #{yaml_value(runtime_turn_timeout_ms)}",
+        "  read_timeout_ms: #{yaml_value(runtime_read_timeout_ms)}",
+        "  stall_timeout_ms: #{yaml_value(runtime_stall_timeout_ms)}",
+        "  model: #{yaml_value(runtime_model)}",
+        "  agent: #{yaml_value(runtime_agent)}",
+        "  variant: #{yaml_value(runtime_variant)}",
         "codex:",
-        "  command: #{yaml_value(codex_command)}",
         "  approval_policy: #{yaml_value(codex_approval_policy)}",
         "  thread_sandbox: #{yaml_value(codex_thread_sandbox)}",
         "  turn_sandbox_policy: #{yaml_value(codex_turn_sandbox_policy)}",
-        "  turn_timeout_ms: #{yaml_value(codex_turn_timeout_ms)}",
-        "  read_timeout_ms: #{yaml_value(codex_read_timeout_ms)}",
-        "  stall_timeout_ms: #{yaml_value(codex_stall_timeout_ms)}",
         hooks_yaml(hook_after_create, hook_before_run, hook_after_run, hook_before_remove, hook_timeout_ms),
         observability_yaml(observability_enabled, observability_refresh_ms, observability_render_interval_ms),
         server_yaml(server_port, server_host),
@@ -199,6 +221,15 @@ defmodule SymphonyElixir.TestSupport do
       |> Enum.reject(&(&1 in [nil, ""]))
 
     Enum.join(sections, "\n") <> "\n"
+  end
+
+  defp pick_runtime_value(overrides, config, runtime_key, legacy_key)
+       when is_list(overrides) and is_list(config) and is_atom(runtime_key) and is_atom(legacy_key) do
+    cond do
+      Keyword.has_key?(overrides, runtime_key) -> Keyword.get(config, runtime_key)
+      Keyword.has_key?(overrides, legacy_key) -> Keyword.get(config, legacy_key)
+      true -> Keyword.get(config, runtime_key)
+    end
   end
 
   defp yaml_value(value) when is_binary(value) do

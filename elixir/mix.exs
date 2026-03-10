@@ -20,6 +20,9 @@ defmodule SymphonyElixir.MixProject do
           SymphonyElixir.Orchestrator.State,
           SymphonyElixir.AgentRunner,
           SymphonyElixir.CLI,
+          SymphonyElixir.Runtime,
+          SymphonyElixir.Runtime.Adapter,
+          SymphonyElixir.Runtime.OpenCode,
           SymphonyElixir.Codex.AppServer,
           SymphonyElixir.Codex.DynamicTool,
           SymphonyElixir.HttpServer,
@@ -44,7 +47,7 @@ defmodule SymphonyElixir.MixProject do
         "test/support/test_support.exs"
       ],
       dialyzer: [
-        plt_add_apps: [:mix]
+        plt_add_apps: [:mix, :inets]
       ],
       escript: escript(),
       aliases: aliases(),
@@ -56,7 +59,7 @@ defmodule SymphonyElixir.MixProject do
   def application do
     [
       mod: {SymphonyElixir.Application, []},
-      extra_applications: [:logger]
+      extra_applications: [:logger, :inets]
     ]
   end
 

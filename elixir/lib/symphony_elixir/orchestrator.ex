@@ -9,6 +9,7 @@ defmodule SymphonyElixir.Orchestrator do
 
   alias SymphonyElixir.{AgentRunner, Config, StatusDashboard, Tracker, Workspace}
   alias SymphonyElixir.Linear.Issue
+  alias SymphonyElixirWeb.ObservabilityPubSub
 
   @continuation_retry_delay_ms 1_000
   @failure_retry_base_ms 10_000
@@ -20,6 +21,7 @@ defmodule SymphonyElixir.Orchestrator do
     total_tokens: 0,
     seconds_running: 0
   }
+  @max_activity_events 500
 
   defmodule State do
     @moduledoc """
@@ -36,7 +38,8 @@ defmodule SymphonyElixir.Orchestrator do
       claimed: MapSet.new(),
       retry_attempts: %{},
       codex_totals: nil,
-      codex_rate_limits: nil
+      codex_rate_limits: nil,
+      activity_history: []
     ]
   end
 
@@ -56,7 +59,8 @@ defmodule SymphonyElixir.Orchestrator do
       next_poll_due_at_ms: now_ms,
       poll_check_in_progress: false,
       codex_totals: @empty_codex_totals,
-      codex_rate_limits: nil
+      codex_rate_limits: nil,
+      activity_history: []
     }
 
     run_terminal_workspace_cleanup()
@@ -132,24 +136,19 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   def handle_info(
-        {:codex_worker_update, issue_id, %{event: _, timestamp: _} = update},
-        %{running: running} = state
+        {:runtime_worker_update, issue_id, %{event: _, timestamp: _} = update},
+        state
       ) do
-    case Map.get(running, issue_id) do
-      nil ->
-        {:noreply, state}
+    {:noreply, integrate_worker_update(state, issue_id, update)}
+  end
 
-      running_entry ->
-        {updated_running_entry, token_delta} = integrate_codex_update(running_entry, update)
+  def handle_info({:runtime_worker_update, _issue_id, _update}, state), do: {:noreply, state}
 
-        state =
-          state
-          |> apply_codex_token_delta(token_delta)
-          |> apply_codex_rate_limits(update)
-
-        notify_dashboard()
-        {:noreply, %{state | running: Map.put(running, issue_id, updated_running_entry)}}
-    end
+  def handle_info(
+        {:codex_worker_update, issue_id, %{event: _, timestamp: _} = update},
+        state
+      ) do
+    {:noreply, integrate_worker_update(state, issue_id, update)}
   end
 
   def handle_info({:codex_worker_update, _issue_id, _update}, state), do: {:noreply, state}
@@ -168,6 +167,29 @@ defmodule SymphonyElixir.Orchestrator do
   def handle_info(msg, state) do
     Logger.debug("Orchestrator ignored message: #{inspect(msg)}")
     {:noreply, state}
+  end
+
+  defp integrate_worker_update(%{running: running} = state, issue_id, update) do
+    case Map.get(running, issue_id) do
+      nil ->
+        state
+
+      running_entry ->
+        {updated_running_entry, token_delta} = integrate_codex_update(running_entry, update)
+
+        activity_event = build_activity_event(issue_id, updated_running_entry, update)
+
+        state =
+          state
+          |> apply_codex_token_delta(token_delta)
+          |> apply_codex_rate_limits(update)
+          |> append_activity_event(activity_event)
+
+        ObservabilityPubSub.broadcast_activity(activity_event)
+        notify_dashboard()
+
+        %{state | running: Map.put(running, issue_id, updated_running_entry)}
+    end
   end
 
   defp maybe_dispatch(%State{} = state) do
@@ -200,8 +222,12 @@ defmodule SymphonyElixir.Orchestrator do
 
         state
 
-      {:error, :missing_codex_command} ->
-        Logger.error("Codex command missing in WORKFLOW.md")
+      {:error, :missing_runtime_command} ->
+        Logger.error("Runtime command missing in WORKFLOW.md")
+        state
+
+      {:error, {:unsupported_runtime_provider, value}} ->
+        Logger.error("Unsupported runtime.provider in WORKFLOW.md: #{inspect(value)}")
         state
 
       {:error, {:invalid_codex_approval_policy, value}} ->
@@ -369,7 +395,7 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp reconcile_stalled_running_issues(%State{} = state) do
-    timeout_ms = Config.codex_stall_timeout_ms()
+    timeout_ms = Config.runtime_stall_timeout_ms()
 
     cond do
       timeout_ms <= 0 ->
@@ -903,6 +929,20 @@ defmodule SymphonyElixir.Orchestrator do
   @spec snapshot() :: map() | :timeout | :unavailable
   def snapshot, do: snapshot(__MODULE__, 15_000)
 
+  @spec recent_activity() :: [map()] | :unavailable
+  def recent_activity do
+    recent_activity(__MODULE__, 100)
+  end
+
+  @spec recent_activity(GenServer.server(), pos_integer()) :: [map()] | :unavailable
+  def recent_activity(server, limit) when is_integer(limit) and limit > 0 do
+    if Process.whereis(server) do
+      GenServer.call(server, {:recent_activity, limit})
+    else
+      :unavailable
+    end
+  end
+
   @spec snapshot(GenServer.server(), timeout()) :: map() | :timeout | :unavailable
   def snapshot(server, timeout) do
     if Process.whereis(server) do
@@ -988,6 +1028,11 @@ defmodule SymphonyElixir.Orchestrator do
      }, state}
   end
 
+  def handle_call({:recent_activity, limit}, _from, state)
+      when is_integer(limit) and limit > 0 do
+    {:reply, Enum.take(state.activity_history, limit), state}
+  end
+
   defp integrate_codex_update(running_entry, %{event: event, timestamp: timestamp} = update) do
     token_delta = extract_token_delta(running_entry, update)
     codex_input_tokens = Map.get(running_entry, :codex_input_tokens, 0)
@@ -1060,6 +1105,31 @@ defmodule SymphonyElixir.Orchestrator do
       message: update[:payload] || update[:raw],
       timestamp: update[:timestamp]
     }
+  end
+
+  defp build_activity_event(issue_id, running_entry, update)
+       when is_binary(issue_id) and is_map(running_entry) and is_map(update) do
+    %{
+      issue_id: issue_id,
+      issue_identifier: Map.get(running_entry, :identifier),
+      session_id: Map.get(running_entry, :session_id),
+      event: update[:event],
+      at: update[:timestamp] || DateTime.utc_now(),
+      message: summarize_codex_update(update),
+      tokens: %{
+        input_tokens: Map.get(running_entry, :codex_input_tokens, 0),
+        output_tokens: Map.get(running_entry, :codex_output_tokens, 0),
+        total_tokens: Map.get(running_entry, :codex_total_tokens, 0)
+      }
+    }
+  end
+
+  defp build_activity_event(_issue_id, _running_entry, _update), do: nil
+
+  defp append_activity_event(state, nil), do: state
+
+  defp append_activity_event(%State{} = state, %{} = activity_event) do
+    %{state | activity_history: [activity_event | state.activity_history] |> Enum.take(@max_activity_events)}
   end
 
   defp schedule_tick(delay_ms) do
