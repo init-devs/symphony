@@ -130,6 +130,8 @@ Notes:
   `tracker.team_key`.
 - If both are set, `tracker.project_slug` takes precedence.
 - `tracker.assignee` optionally filters candidate issues by assignee (`me` or a Linear user ID).
+- `tracker.actionable_label` optionally filters candidate issues to only those containing the label.
+- When both `tracker.assignee` and `tracker.actionable_label` are set, both filters apply.
 - Assignee precedence is non-empty `tracker.assignee` first, then `LINEAR_ASSIGNEE`; empty values are treated as unset.
 - `runtime.provider` currently supports `opencode`.
 - `runtime.command` defaults to `opencode serve --hostname 127.0.0.1 --port 0`.

@@ -7,6 +7,8 @@ tracker:
   # If both are set, project_slug takes precedence.
   # Optional assignee routing:
   # assignee: "me"
+  # Optional actionable label gate (only issues with this label are eligible):
+  # actionable_label: "autonomous"
   active_states:
     - Todo
     - In Progress

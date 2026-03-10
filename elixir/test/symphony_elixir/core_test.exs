@@ -15,6 +15,7 @@ defmodule SymphonyElixir.CoreTest do
     assert Config.linear_active_states() == ["Todo", "In Progress"]
     assert Config.linear_terminal_states() == ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"]
     assert Config.linear_assignee() == nil
+    assert Config.linear_actionable_label() == nil
     assert Config.linear_team_key() == nil
     assert Config.agent_max_turns() == 20
 
@@ -200,6 +201,24 @@ defmodule SymphonyElixir.CoreTest do
     )
 
     assert Config.linear_assignee() == nil
+  end
+
+  test "linear actionable label resolves from workflow and treats blank values as unset" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_actionable_label: "  autonomous  ",
+      tracker_project_slug: "project",
+      codex_command: "/bin/sh app-server"
+    )
+
+    assert Config.linear_actionable_label() == "autonomous"
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_actionable_label: "   ",
+      tracker_project_slug: "project",
+      codex_command: "/bin/sh app-server"
+    )
+
+    assert Config.linear_actionable_label() == nil
   end
 
   test "workflow file path defaults to WORKFLOW.md in the current working directory when app env is unset" do

@@ -344,6 +344,11 @@ defmodule SymphonyElixir.Orchestrator do
 
         terminate_running_issue(state, issue.id, false)
 
+      !issue_matches_actionable_label?(issue) ->
+        Logger.info("Issue no longer matches actionable label filter: #{issue_context(issue)} labels=#{inspect(issue.labels)}; stopping active agent")
+
+        terminate_running_issue(state, issue.id, false)
+
       active_issue_state?(issue.state, active_states) ->
         refresh_running_issue_state(state, issue)
 
@@ -553,6 +558,7 @@ defmodule SymphonyElixir.Orchestrator do
        )
        when is_binary(id) and is_binary(identifier) and is_binary(title) and is_binary(state_name) do
     issue_routable_to_worker?(issue) and
+      issue_matches_actionable_label?(issue) and
       active_issue_state?(state_name, active_states) and
       !terminal_issue_state?(state_name, terminal_states)
   end
@@ -564,6 +570,32 @@ defmodule SymphonyElixir.Orchestrator do
        do: assigned_to_worker
 
   defp issue_routable_to_worker?(_issue), do: true
+
+  defp issue_matches_actionable_label?(%Issue{} = issue) do
+    case normalize_issue_label(Config.linear_actionable_label()) do
+      nil ->
+        true
+
+      actionable_label ->
+        issue
+        |> issue_labels()
+        |> Enum.any?(fn label -> normalize_issue_label(label) == actionable_label end)
+    end
+  end
+
+  defp issue_matches_actionable_label?(_issue), do: false
+
+  defp issue_labels(%Issue{labels: labels}) when is_list(labels), do: labels
+  defp issue_labels(_issue), do: []
+
+  defp normalize_issue_label(label) when is_binary(label) do
+    case String.downcase(String.trim(label)) do
+      "" -> nil
+      normalized -> normalized
+    end
+  end
+
+  defp normalize_issue_label(_label), do: nil
 
   defp todo_issue_blocked_by_non_terminal?(
          %Issue{state: issue_state, blocked_by: blockers},
@@ -845,11 +877,11 @@ defmodule SymphonyElixir.Orchestrator do
          issue.id,
          attempt + 1,
          Map.merge(metadata, %{
-            identifier: issue.identifier,
-            issue: issue,
-            error: "no available orchestrator slots"
-          })
-        )}
+           identifier: issue.identifier,
+           issue: issue,
+           error: "no available orchestrator slots"
+         })
+       )}
     end
   end
 
@@ -1009,11 +1041,11 @@ defmodule SymphonyElixir.Orchestrator do
     {:reply,
      %{
        started_at: state.started_at,
-        max_concurrent_agents: state.max_concurrent_agents,
-        completed_count: MapSet.size(state.completed),
-        running: running,
-        retrying: retrying,
-        codex_totals: state.codex_totals,
+       max_concurrent_agents: state.max_concurrent_agents,
+       completed_count: MapSet.size(state.completed),
+       running: running,
+       retrying: retrying,
+       codex_totals: state.codex_totals,
        rate_limits: Map.get(state, :codex_rate_limits),
        polling: %{
          checking?: state.poll_check_in_progress == true,

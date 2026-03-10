@@ -189,14 +189,8 @@ defmodule SymphonyElixirWeb.Presenter do
     validation = %{
       workflow_file: status_for(match?({:ok, _}, workflow_result)),
       tracker_kind: status_for(tracker_kind in ["linear", "memory"]),
-      tracker_api_key:
-        status_for(
-          tracker_kind != "linear" or is_binary(Config.linear_api_token())
-        ),
-      tracker_scope:
-        status_for(
-          tracker_kind != "linear" or not is_nil(Config.linear_scope())
-        ),
+      tracker_api_key: status_for(tracker_kind != "linear" or is_binary(Config.linear_api_token())),
+      tracker_scope: status_for(tracker_kind != "linear" or not is_nil(Config.linear_scope())),
       runtime_provider: status_for(Config.runtime_provider() == "opencode"),
       runtime_command: status_for(valid_non_empty_string?(Config.runtime_command()))
     }
@@ -217,6 +211,7 @@ defmodule SymphonyElixirWeb.Presenter do
           project_slug: Config.linear_project_slug(),
           team_key: Config.linear_team_key(),
           assignee: Config.linear_assignee(),
+          actionable_label: Config.linear_actionable_label(),
           active_states: Config.linear_active_states(),
           terminal_states: Config.linear_terminal_states()
         },
@@ -482,8 +477,7 @@ defmodule SymphonyElixirWeb.Presenter do
       input_tokens: Map.get(codex_totals, :input_tokens) || Map.get(codex_totals, "input_tokens") || 0,
       output_tokens: Map.get(codex_totals, :output_tokens) || Map.get(codex_totals, "output_tokens") || 0,
       total_tokens: Map.get(codex_totals, :total_tokens) || Map.get(codex_totals, "total_tokens") || 0,
-      seconds_running:
-        Map.get(codex_totals, :seconds_running) || Map.get(codex_totals, "seconds_running") || 0
+      seconds_running: Map.get(codex_totals, :seconds_running) || Map.get(codex_totals, "seconds_running") || 0
     }
     |> Map.reject(fn {_key, value} -> is_nil(value) end)
   end

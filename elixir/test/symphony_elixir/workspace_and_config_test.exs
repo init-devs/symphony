@@ -487,6 +487,98 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     refute Orchestrator.should_dispatch_issue_for_test(issue, state)
   end
 
+  test "issue missing actionable label is not dispatch-eligible" do
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_actionable_label: "autonomous")
+
+    state = %Orchestrator.State{
+      max_concurrent_agents: 3,
+      running: %{},
+      claimed: MapSet.new(),
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      retry_attempts: %{}
+    }
+
+    issue = %Issue{
+      id: "label-gate-1",
+      identifier: "MT-1008",
+      title: "Missing actionable label",
+      state: "Todo",
+      labels: ["backend"]
+    }
+
+    refute Orchestrator.should_dispatch_issue_for_test(issue, state)
+  end
+
+  test "issue with actionable label remains dispatch-eligible" do
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_actionable_label: "autonomous")
+
+    state = %Orchestrator.State{
+      max_concurrent_agents: 3,
+      running: %{},
+      claimed: MapSet.new(),
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      retry_attempts: %{}
+    }
+
+    issue = %Issue{
+      id: "label-gate-2",
+      identifier: "MT-1009",
+      title: "Has actionable label",
+      state: "Todo",
+      labels: ["AUTONOMOUS", "backend"]
+    }
+
+    assert Orchestrator.should_dispatch_issue_for_test(issue, state)
+  end
+
+  test "assignee and actionable label filters are conjunctive" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_assignee: "me",
+      tracker_actionable_label: "autonomous"
+    )
+
+    state = %Orchestrator.State{
+      max_concurrent_agents: 3,
+      running: %{},
+      claimed: MapSet.new(),
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      retry_attempts: %{}
+    }
+
+    issue_assigned_away = %Issue{
+      id: "label-assignee-1",
+      identifier: "MT-1010",
+      title: "Assigned elsewhere",
+      state: "Todo",
+      labels: ["autonomous"],
+      assigned_to_worker: false
+    }
+
+    refute Orchestrator.should_dispatch_issue_for_test(issue_assigned_away, state)
+
+    issue_missing_label = %Issue{
+      id: "label-assignee-2",
+      identifier: "MT-1011",
+      title: "Assigned to me but wrong label",
+      state: "Todo",
+      labels: ["backend"],
+      assigned_to_worker: true
+    }
+
+    refute Orchestrator.should_dispatch_issue_for_test(issue_missing_label, state)
+
+    issue_matches_both = %Issue{
+      id: "label-assignee-3",
+      identifier: "MT-1012",
+      title: "Assigned to me with matching label",
+      state: "Todo",
+      labels: ["autonomous", "backend"],
+      assigned_to_worker: true
+    }
+
+    assert Orchestrator.should_dispatch_issue_for_test(issue_matches_both, state)
+  end
+
   test "todo issue with terminal blockers remains dispatch-eligible" do
     state = %Orchestrator.State{
       max_concurrent_agents: 3,
@@ -753,6 +845,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_active_states: %{todo: true},
       tracker_terminal_states: %{done: true},
+      tracker_actionable_label: %{gate: true},
       poll_interval_ms: %{bad: true},
       workspace_root: 123,
       max_retry_backoff_ms: 0,
@@ -767,6 +860,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
     assert Config.linear_active_states() == ["Todo", "In Progress"]
     assert Config.linear_terminal_states() == ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"]
+    assert Config.linear_actionable_label() == nil
     assert Config.poll_interval_ms() == 30_000
     assert Config.workspace_root() == Path.join(System.tmp_dir!(), "symphony_workspaces")
     assert Config.max_retry_backoff_ms() == 300_000

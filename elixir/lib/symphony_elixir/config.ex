@@ -56,6 +56,7 @@ defmodule SymphonyElixir.Config do
                                  project_slug: [type: {:or, [:string, nil]}, default: nil],
                                  team_key: [type: {:or, [:string, nil]}, default: nil],
                                  assignee: [type: {:or, [:string, nil]}, default: nil],
+                                 actionable_label: [type: {:or, [:string, nil]}, default: nil],
                                  active_states: [
                                    type: {:list, :string},
                                    default: @default_active_states
@@ -248,6 +249,13 @@ defmodule SymphonyElixir.Config do
 
     workflow_assignee
     |> resolve_env_value(System.get_env("LINEAR_ASSIGNEE"))
+    |> normalize_secret_value()
+  end
+
+  @spec linear_actionable_label() :: String.t() | nil
+  def linear_actionable_label do
+    validated_workflow_options()
+    |> get_in([:tracker, :actionable_label])
     |> normalize_secret_value()
   end
 
@@ -563,6 +571,7 @@ defmodule SymphonyElixir.Config do
     |> put_if_present(:project_slug, scalar_string_value(Map.get(section, "project_slug")))
     |> put_if_present(:team_key, scalar_string_value(Map.get(section, "team_key")))
     |> put_if_present(:assignee, scalar_string_value(Map.get(section, "assignee")))
+    |> put_if_present(:actionable_label, scalar_string_value(Map.get(section, "actionable_label")))
     |> put_if_present(:active_states, csv_value(Map.get(section, "active_states")))
     |> put_if_present(:terminal_states, csv_value(Map.get(section, "terminal_states")))
   end

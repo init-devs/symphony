@@ -355,6 +355,10 @@ Fields:
   - Default: `Todo`, `In Progress`
 - `terminal_states` (list of strings or comma-separated string)
   - Default: `Closed`, `Cancelled`, `Canceled`, `Duplicate`, `Done`
+- `actionable_label` (string, optional)
+  - When set, only issues containing this label are dispatch-eligible.
+  - Matching should be case-insensitive.
+  - Combines conjunctively with other routing filters (for example assignee).
 
 #### 5.3.2 `polling` (object)
 
@@ -557,6 +561,7 @@ This section is intentionally redundant so a coding agent can implement the conf
 - `tracker.project_slug`: string, required when `tracker.kind=linear`
 - `tracker.active_states`: list/string, default `Todo, In Progress`
 - `tracker.terminal_states`: list/string, default `Closed, Cancelled, Canceled, Duplicate, Done`
+- `tracker.actionable_label`: string, optional; requires matching issue label for dispatch eligibility
 - `polling.interval_ms`: integer, default `30000`
 - `workspace.root`: path, default `<system-temp>/symphony_workspaces`
 - `hooks.after_create`: shell script or null
@@ -709,6 +714,7 @@ An issue is dispatch-eligible only if all are true:
 - Per-state concurrency slots are available.
 - Blocker rule for `Todo` state passes:
   - If the issue state is `Todo`, do not dispatch when any blocker is non-terminal.
+- If `tracker.actionable_label` is configured, the issue has a matching label (case-insensitive).
 
 Sorting order (stable intent):
 
